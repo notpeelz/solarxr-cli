@@ -1,0 +1,2 @@
+[alias]
+make = "run --package make --quiet --"

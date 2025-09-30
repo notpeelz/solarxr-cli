@@ -1,0 +1,9 @@
+[package]
+name = "solarxr-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solarxr-protocol = { path = "../solarxr-protocol/protocol/rust", package = "solarxr_protocol" }
+tokio = { version = "1.47.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.41"
