@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     io::{self, BufRead, BufReader},
+    ops::Deref,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::LazyLock,
@@ -75,19 +76,23 @@ struct BuildArtifacts {
     cli_exe: PathBuf,
 }
 
-fn build() -> Result<BuildArtifacts> {
+fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
     let metadata = cargo_metadata();
     let package_id = metadata.get_package_id("solarxr-cli")?;
 
     let mut cmd = std::process::Command::new(cargo_path())
-        .args([
-            "build",
-            "--release",
-            "--message-format",
-            "json-render-diagnostics",
-            "-p",
-            "solarxr-cli",
-        ])
+        .args(
+            [
+                "build",
+                "--message-format",
+                "json-render-diagnostics",
+                "-p",
+                "solarxr-cli",
+            ]
+            .iter()
+            .map(Deref::deref)
+            .chain(args.iter().map(AsRef::as_ref)),
+        )
         .stdout(std::process::Stdio::piped())
         .spawn()
         .wrap_err("failed to call cargo")?;
@@ -101,27 +106,35 @@ fn build() -> Result<BuildArtifacts> {
     let mut cli_build_out_dir: Option<PathBuf> = None;
     let mut cli_exe: Option<PathBuf> = None;
 
+    let mut seen_compiler_message = false;
     for line in reader.lines() {
         let line = match line {
             Ok(l) if !l.trim().is_empty() => l,
             _ => continue,
         };
 
-        match serde_json::from_str::<Message>(&line) {
-            Ok(Message::BuildScriptExecuted(msg)) if msg.package_id == package_id => {
-                cli_build_out_dir = Some(PathBuf::from(msg.out_dir));
+        let msg = match serde_json::from_str::<Message>(&line) {
+            Ok(msg) => {
+                seen_compiler_message = true;
+                msg
             }
-            Ok(Message::CompilerArtifact(artifact)) if artifact.target.name == "solarxr-cli" => {
-                if let Some(exe) = artifact.executable {
-                    cli_exe = Some(PathBuf::from(exe));
-                }
-            }
-            Ok(_) => {}
             Err(e) => {
                 if e.is_syntax() {
                     println!("{line}");
                 }
+                continue;
             }
+        };
+        match msg {
+            Message::BuildScriptExecuted(msg) if msg.package_id == package_id => {
+                cli_build_out_dir = Some(PathBuf::from(msg.out_dir));
+            }
+            Message::CompilerArtifact(artifact) if artifact.target.name == "solarxr-cli" => {
+                if let Some(exe) = artifact.executable {
+                    cli_exe = Some(PathBuf::from(exe));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -129,7 +142,11 @@ fn build() -> Result<BuildArtifacts> {
         .wait()
         .wrap_err("failed to wait on cargo build process")?;
     if !status.success() {
-        return Err(eyre!("failed to build solarxr-cli"));
+        bail!("failed to build solarxr-cli");
+    }
+
+    if !seen_compiler_message {
+        bail!("no compiler output");
     }
 
     let cli_build_out_dir = cli_build_out_dir
@@ -151,8 +168,15 @@ pub struct Args {
 
 #[derive(clap::Subcommand)]
 pub enum Command {
-    Build,
-    Install { dest: PathBuf },
+    Build {
+        #[arg(last = true)]
+        build_args: Vec<String>,
+    },
+    Install {
+        dest: PathBuf,
+        #[arg(last = true)]
+        build_args: Vec<String>,
+    },
 }
 
 fn install_dir<P: AsRef<Path>>(path: P, perm: u32) -> io::Result<()> {
@@ -170,11 +194,11 @@ fn install_file<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q, perm: u32) -> i
 fn main() -> Result<()> {
     let args = <Args as clap::Parser>::parse();
     match args.command {
-        Command::Build => {
-            build()?;
+        Command::Build { build_args } => {
+            build(&build_args)?;
             Ok(())
         }
-        Command::Install { dest } => {
+        Command::Install { dest, build_args } => {
             match dest.metadata() {
                 Ok(m) => {
                     if m.is_dir() {
@@ -190,7 +214,7 @@ fn main() -> Result<()> {
                 }
             }
 
-            let build_artifacts = build()?;
+            let build_artifacts = build(&build_args)?;
 
             let bin_dir = dest.join("bin");
             install_dir(&bin_dir, 0o755)?;
