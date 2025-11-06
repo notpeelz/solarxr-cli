@@ -505,7 +505,7 @@ impl SolarXRClient {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
-            let m = HeightRequest::create(&mut fbb, &HeightRequestArgs {});
+            let m = HeightRequest::create(&mut fbb, &HeightRequestArgs::default());
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
