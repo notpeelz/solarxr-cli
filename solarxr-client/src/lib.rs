@@ -101,10 +101,10 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
         let mut buf = MutexGuard::map(buf, |x| &mut x[..len]);
         stream.read_exact(&mut buf).await?;
 
-        let bundle = flatbuffers::root::<MessageBundle>(&*buf).map_err(|err| {
+        let bundle = flatbuffers::root::<MessageBundle>(&buf).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("invalid flatbuffer data: {}", err.to_string()),
+                format!("invalid flatbuffer data: {}", err),
             )
         })?;
         // Clone the buffer and share it with Arc so it can be used by all pending transactions
@@ -210,9 +210,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
                             trace!("received shutdown signal");
                             return Ok(());
                         },
-                        r = state.pump() => if let Err(err) = r {
-                            return Err(err);
-                        },
+                        r = state.pump() => r?,
                     }
                 }
             }

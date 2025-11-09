@@ -23,7 +23,7 @@ const fn format_version(s: &str) -> &str {
             }
         }
     }
-    unsafe { &str::from_utf8_unchecked(bytes) }
+    unsafe { str::from_utf8_unchecked(bytes) }
 }
 
 const VERSION: &str = format_version(crate_version!());
