@@ -23,7 +23,7 @@ use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
 use tokio::sync::{Mutex, MutexGuard, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{debug, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 
 pub use solarxr_protocol::datatypes::BodyPart;
 
@@ -224,17 +224,18 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         }
     }
 
+    #[instrument(level = "trace", skip_all)]
     async fn write(&mut self, data: &[u8]) -> Result<()> {
         let len = (data.len() as u32 + 4).to_le_bytes();
         let mut stream = self.state.stream_writer.lock().await;
-        trace!("acquired stream lock for writing");
+        trace!("sending message to server");
         stream.write_all(&len).await?;
-        trace!("wrote len to server");
         stream.write_all(data).await?;
-        trace!("wrote data to server");
+        trace!("sent message to server");
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     async fn new_transaction(&self) -> Transaction {
         let mut transactions = self.state.transactions_state.transactions.lock().await;
         let id = self
@@ -252,6 +253,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         }
     }
 
+    #[instrument(level = "trace", skip(self))]
     async fn consume_message(
         &mut self,
         rx: &mut mpsc::Receiver<owned::RpcMessageHeader>,
@@ -263,6 +265,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         Ok(response.expect("transaction channel is closed"))
     }
 
+    #[instrument(level = "trace", skip(self))]
     async fn reset_with_parts(
         &mut self,
         reset_type: ResetType,
@@ -293,6 +296,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     async fn reset(&mut self, reset_type: ResetType) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
@@ -344,6 +348,7 @@ impl SolarXRClient {
     impl_reset_with_parts!(reset_mounting_with_parts; ResetType::Mounting);
     impl_reset_with_parts!(reset_full_with_parts; ResetType::Full);
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn pause_tracking_state(&mut self) -> Result<bool> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
@@ -378,6 +383,7 @@ impl SolarXRClient {
         Ok(response.trackingPaused())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn set_pause_tracking(&mut self, state: bool) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
@@ -401,6 +407,7 @@ impl SolarXRClient {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn save_stay_aligned_pose(&mut self, pose: StayAlignedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
@@ -428,6 +435,7 @@ impl SolarXRClient {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn reset_stay_aligned_pose(&mut self, pose: StayAlignedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
@@ -455,6 +463,7 @@ impl SolarXRClient {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn set_stay_aligned_enabled(&mut self, enabled: bool) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
@@ -476,6 +485,7 @@ impl SolarXRClient {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn stay_aligned_enabled(&mut self) -> Result<bool> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
@@ -511,6 +521,7 @@ impl SolarXRClient {
         Ok(stay_aligned_settings.enabled())
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub async fn get_height(&mut self) -> Result<HeightData> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
