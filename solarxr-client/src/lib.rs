@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use solarxr_protocol::data_feed::{DataFeedMessage, DataFeedMessageHeader};
 use solarxr_protocol::datatypes::TransactionId;
 use solarxr_protocol::flatbuffers::{FlatBufferBuilder, WIPOffset};
 use solarxr_protocol::rpc::{
@@ -49,6 +50,21 @@ pub mod owned {
         }
     }
 
+    pub struct DataFeedUpdate {
+        pub(crate) buf: Arc<Vec<u8>>,
+        pub(crate) loc: usize,
+    }
+
+    impl DataFeedUpdate {
+        pub fn as_flatbuf(&'_ self) -> solarxr_protocol::data_feed::DataFeedUpdate<'_> {
+            unsafe {
+                solarxr_protocol::data_feed::DataFeedUpdate::init_from_table(Table::new(
+                    &self.buf, self.loc,
+                ))
+            }
+        }
+    }
+
     pub struct HeightResponse {
         pub(crate) msg: owned::RpcMessageHeader,
     }
@@ -81,16 +97,38 @@ fn create_rpc_msg<'bldr: 'b, 'b>(
     fbb.finished_data()
 }
 
-pub struct SolarXRClient<const BUF_SIZE: usize = 1024> {
-    state: Arc<ClientState<BUF_SIZE>>,
+fn create_data_feed_msg<'bldr: 'b, 'b>(
+    fbb: &'bldr mut FlatBufferBuilder<'bldr>,
+    items: &'b [WIPOffset<DataFeedMessageHeader<'bldr>>],
+) -> &'bldr [u8] {
+    let data_feed_msgs = fbb.create_vector(items);
+
+    let msg = solarxr_protocol::MessageBundle::create(
+        fbb,
+        &MessageBundleArgs {
+            data_feed_msgs: Some(data_feed_msgs),
+            ..Default::default()
+        },
+    );
+    fbb.finish(msg, None);
+    fbb.finished_data()
+}
+
+pub struct SolarXRClient<
+    const FB_BUF_SIZE: usize = 1024,
+    const DATA_FEED_UPDATE_BUF_SIZE: usize = 16,
+> {
+    state: Arc<ClientState<FB_BUF_SIZE, DATA_FEED_UPDATE_BUF_SIZE>>,
     pump_task: Option<(JoinHandle<Result<()>>, oneshot::Sender<()>)>,
 }
 
-struct ClientState<const BUF_SIZE: usize> {
+struct ClientState<const FB_BUF_SIZE: usize, const DATA_FEED_UPDATE_BUF_SIZE: usize> {
     stream_reader: Mutex<OwnedReadHalf>,
     stream_writer: Mutex<OwnedWriteHalf>,
+    data_feed_update_tx: Mutex<mpsc::Sender<owned::DataFeedUpdate>>,
+    data_feed_update_rx: Mutex<mpsc::Receiver<owned::DataFeedUpdate>>,
     transactions_state: Arc<TransactionsState>,
-    buf: Mutex<[u8; BUF_SIZE]>,
+    buf: Mutex<[u8; FB_BUF_SIZE]>,
 }
 
 struct TransactionsState {
@@ -100,7 +138,9 @@ struct TransactionsState {
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 
-impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
+impl<const FB_BUF_SIZE: usize, const DATA_FEED_UPDATE_BUF_SIZE: usize>
+    ClientState<FB_BUF_SIZE, DATA_FEED_UPDATE_BUF_SIZE>
+{
     async fn pump(&self) -> Result<()> {
         let mut stream = self.stream_reader.lock().await;
         let buf = self.buf.lock().await;
@@ -108,7 +148,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
         let mut len = [0u8; 4];
         stream.read_exact(&mut len).await?;
         let len = u32::from_le_bytes(len) as usize;
-        if len < 4 || len > BUF_SIZE {
+        if len < 4 || len > FB_BUF_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidData, ""));
         }
         let len = len - 4;
@@ -163,6 +203,26 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
             }
         }
 
+        if let Some(data_feed_msgs) = bundle.data_feed_msgs() {
+            for msg in data_feed_msgs {
+                if let DataFeedMessage::DataFeedUpdate = msg.message_type() {
+                    let tx = self.data_feed_update_tx.lock().await;
+                    let msg = msg.message_as_data_feed_update().unwrap();
+                    match tx.try_send(owned::DataFeedUpdate {
+                        buf: Arc::clone(&shared_buf),
+                        loc: msg._tab.loc(),
+                    }) {
+                        Ok(_) => {}
+                        Err(mpsc::error::TrySendError::Closed(_)) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            // TODO: debounce to avoid spamming logs?
+                            warn!("dropping data feed update as the buffer is full");
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -187,7 +247,9 @@ impl Drop for Transaction {
 }
 
 // FIXME: use AsyncDrop
-impl<const BUF_SIZE: usize> Drop for SolarXRClient<BUF_SIZE> {
+impl<const FB_BUF_SIZE: usize, const DATA_FEED_UPDATE_BUF_SIZE: usize> Drop
+    for SolarXRClient<FB_BUF_SIZE, DATA_FEED_UPDATE_BUF_SIZE>
+{
     fn drop(&mut self) {
         if let Some((pump_task, shutdown_tx)) = self.pump_task.take() {
             let _ = shutdown_tx.send(());
@@ -199,18 +261,25 @@ impl<const BUF_SIZE: usize> Drop for SolarXRClient<BUF_SIZE> {
     }
 }
 
-impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
+impl<const FB_BUF_SIZE: usize, const DATA_FEED_UPDATE_BUF_SIZE: usize>
+    SolarXRClient<FB_BUF_SIZE, DATA_FEED_UPDATE_BUF_SIZE>
+{
     pub fn new(stream: UnixStream) -> Self {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (stream_reader, stream_writer) = stream.into_split();
+
+        let (data_feed_update_tx, data_feed_update_rx) = mpsc::channel(DATA_FEED_UPDATE_BUF_SIZE);
+
         let state = Arc::new(ClientState {
             stream_reader: Mutex::new(stream_reader),
             stream_writer: Mutex::new(stream_writer),
+            data_feed_update_tx: Mutex::new(data_feed_update_tx),
+            data_feed_update_rx: Mutex::new(data_feed_update_rx),
             transactions_state: Arc::new(TransactionsState {
                 transaction_id_counter: AtomicU32::new(0),
                 transactions: Mutex::new(HashMap::new()),
             }),
-            buf: Mutex::new([0u8; BUF_SIZE]),
+            buf: Mutex::new([0u8; FB_BUF_SIZE]),
         });
 
         let pump_task = tokio::spawn({
@@ -352,7 +421,9 @@ macro_rules! impl_reset_with_parts {
     };
 }
 
-impl SolarXRClient {
+impl<const FB_BUF_SIZE: usize, const DATA_FEED_UPDATE_BUF_SIZE: usize>
+    SolarXRClient<FB_BUF_SIZE, DATA_FEED_UPDATE_BUF_SIZE>
+{
     impl_reset!(reset_yaw; ResetType::Yaw);
     impl_reset!(reset_mounting; ResetType::Mounting);
     impl_reset!(reset_full; ResetType::Full);
@@ -548,5 +619,10 @@ impl SolarXRClient {
             ));
         }
         Ok(owned::HeightResponse::new(response))
+    }
+
+    pub async fn next_data_feed_msg(&mut self) -> Option<owned::DataFeedUpdate> {
+        let mut rx = self.state.data_feed_update_rx.lock().await;
+        rx.recv().await
     }
 }
