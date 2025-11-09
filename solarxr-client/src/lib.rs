@@ -92,7 +92,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
         let buf = self.buf.lock().await;
 
         let mut len = [0u8; 4];
-        stream.read(&mut len).await?;
+        stream.read_exact(&mut len).await?;
         let len = u32::from_le_bytes(len) as usize;
         if len < 4 || len > BUF_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidData, ""));
