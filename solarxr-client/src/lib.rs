@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use solarxr_protocol::datatypes::TransactionId;
-use solarxr_protocol::flatbuffers::{FlatBufferBuilder, Table, WIPOffset};
+use solarxr_protocol::flatbuffers::{FlatBufferBuilder, WIPOffset};
 use solarxr_protocol::rpc::{
     DetectStayAlignedRelaxedPoseRequest, DetectStayAlignedRelaxedPoseRequestArgs,
     EnableStayAlignedRequest, EnableStayAlignedRequestArgs, HeightRequest, HeightRequestArgs,
@@ -28,6 +28,27 @@ use tracing::{debug, trace, warn};
 pub use solarxr_protocol::datatypes::BodyPart;
 
 type Result<T, E = io::Error> = core::result::Result<T, E>;
+
+mod owned {
+    use std::sync::Arc;
+
+    use solarxr_protocol::flatbuffers::Table;
+
+    pub(crate) struct RpcMessageHeader {
+        pub(crate) buf: Arc<Vec<u8>>,
+        pub(crate) loc: usize,
+    }
+
+    impl RpcMessageHeader {
+        pub fn as_flatbuf(&'_ self) -> solarxr_protocol::rpc::RpcMessageHeader<'_> {
+            unsafe {
+                solarxr_protocol::rpc::RpcMessageHeader::init_from_table(Table::new(
+                    &self.buf, self.loc,
+                ))
+            }
+        }
+    }
+}
 
 fn create_rpc_msg<'bldr: 'b, 'b>(
     fbb: &'bldr mut FlatBufferBuilder<'bldr>,
@@ -51,17 +72,6 @@ pub struct SolarXRClient<const BUF_SIZE: usize = 1024> {
     pump_task: Option<(JoinHandle<Result<()>>, oneshot::Sender<()>)>,
 }
 
-struct OwnedRpcMessageHeader {
-    buf: Arc<Vec<u8>>,
-    loc: usize,
-}
-
-impl OwnedRpcMessageHeader {
-    fn as_flatbuf(&'_ self) -> RpcMessageHeader<'_> {
-        unsafe { RpcMessageHeader::init_from_table(Table::new(&self.buf, self.loc)) }
-    }
-}
-
 struct ClientState<const BUF_SIZE: usize> {
     stream_reader: Mutex<OwnedReadHalf>,
     stream_writer: Mutex<OwnedWriteHalf>,
@@ -71,7 +81,7 @@ struct ClientState<const BUF_SIZE: usize> {
 
 struct TransactionsState {
     transaction_id_counter: AtomicU32,
-    transactions: Mutex<HashMap<u32, mpsc::Sender<OwnedRpcMessageHeader>>>,
+    transactions: Mutex<HashMap<u32, mpsc::Sender<owned::RpcMessageHeader>>>,
 }
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
@@ -122,7 +132,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
                     .get(&transaction_id.id())
                 {
                     let res = tx
-                        .send(OwnedRpcMessageHeader {
+                        .send(owned::RpcMessageHeader {
                             buf: Arc::clone(&shared_buf),
                             loc: msg._tab.loc(),
                         })
@@ -145,7 +155,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
 
 struct Transaction {
     id: TransactionId,
-    rx: mpsc::Receiver<OwnedRpcMessageHeader>,
+    rx: mpsc::Receiver<owned::RpcMessageHeader>,
     state: Arc<TransactionsState>,
 }
 
@@ -232,7 +242,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             .transactions_state
             .transaction_id_counter
             .fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = mpsc::channel::<OwnedRpcMessageHeader>(10);
+        let (tx, rx) = mpsc::channel::<owned::RpcMessageHeader>(10);
         transactions.insert(id, tx);
         trace!("registered new transaction {}", id);
         Transaction {
@@ -244,9 +254,9 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
     async fn consume_message(
         &mut self,
-        rx: &mut mpsc::Receiver<OwnedRpcMessageHeader>,
+        rx: &mut mpsc::Receiver<owned::RpcMessageHeader>,
         timeout: Duration,
-    ) -> Result<OwnedRpcMessageHeader> {
+    ) -> Result<owned::RpcMessageHeader> {
         let Ok(response) = tokio::time::timeout(timeout, rx.recv()).await else {
             return Err(io::Error::from(io::ErrorKind::TimedOut));
         };
