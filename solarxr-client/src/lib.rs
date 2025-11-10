@@ -25,27 +25,41 @@ use tokio::sync::{Mutex, MutexGuard, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, instrument, trace, warn};
 
-pub use solarxr_protocol::datatypes::BodyPart;
+pub use solarxr_protocol as proto;
 
 type Result<T, E = io::Error> = core::result::Result<T, E>;
 
-mod owned {
+pub mod owned {
+    use solarxr_protocol::flatbuffers::Table;
     use std::sync::Arc;
 
-    use solarxr_protocol::flatbuffers::Table;
+    use super::proto;
+    use crate::owned;
 
-    pub(crate) struct RpcMessageHeader {
+    pub struct RpcMessageHeader {
         pub(crate) buf: Arc<Vec<u8>>,
         pub(crate) loc: usize,
     }
 
     impl RpcMessageHeader {
-        pub fn as_flatbuf(&'_ self) -> solarxr_protocol::rpc::RpcMessageHeader<'_> {
+        pub fn as_flatbuf(&'_ self) -> proto::rpc::RpcMessageHeader<'_> {
             unsafe {
-                solarxr_protocol::rpc::RpcMessageHeader::init_from_table(Table::new(
-                    &self.buf, self.loc,
-                ))
+                proto::rpc::RpcMessageHeader::init_from_table(Table::new(&self.buf, self.loc))
             }
+        }
+    }
+
+    pub struct HeightResponse {
+        pub(crate) msg: owned::RpcMessageHeader,
+    }
+
+    impl HeightResponse {
+        pub(crate) fn new(msg: owned::RpcMessageHeader) -> Self {
+            Self { msg }
+        }
+
+        pub fn as_flatbuf(&'_ self) -> proto::rpc::HeightResponse<'_> {
+            self.msg.as_flatbuf().message_as_height_response().unwrap()
         }
     }
 }
@@ -56,7 +70,7 @@ fn create_rpc_msg<'bldr: 'b, 'b>(
 ) -> &'bldr [u8] {
     let rpc_msgs = fbb.create_vector(items);
 
-    let msg = solarxr_protocol::MessageBundle::create(
+    let msg = proto::MessageBundle::create(
         fbb,
         &MessageBundleArgs {
             rpc_msgs: Some(rpc_msgs),
@@ -267,7 +281,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
     async fn reset_with_parts(
         &mut self,
         reset_type: ResetType,
-        body_parts: &[BodyPart],
+        body_parts: &[proto::datatypes::BodyPart],
     ) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let body_parts = Some(fbb.create_vector(body_parts));
@@ -332,7 +346,7 @@ macro_rules! impl_reset {
 macro_rules! impl_reset_with_parts {
     ($name:ident; $reset_type:expr) => {
         #[allow(dead_code)]
-        pub async fn $name(&mut self, body_parts: &[BodyPart]) -> Result<()> {
+        pub async fn $name(&mut self, body_parts: &[proto::datatypes::BodyPart]) -> Result<()> {
             self.reset_with_parts($reset_type, body_parts).await
         }
     };
@@ -406,18 +420,12 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn save_stay_aligned_pose(&mut self, pose: StayAlignedPose) -> Result<()> {
+    pub async fn save_stay_aligned_pose(&mut self, pose: StayAlignedRelaxedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = DetectStayAlignedRelaxedPoseRequest::create(
                 &mut fbb,
-                &DetectStayAlignedRelaxedPoseRequestArgs {
-                    pose: match pose {
-                        StayAlignedPose::Standing => StayAlignedRelaxedPose::STANDING,
-                        StayAlignedPose::Sitting => StayAlignedRelaxedPose::SITTING,
-                        StayAlignedPose::Flat => StayAlignedRelaxedPose::FLAT,
-                    },
-                },
+                &DetectStayAlignedRelaxedPoseRequestArgs { pose },
             );
             RpcMessageHeader::create(
                 &mut fbb,
@@ -434,18 +442,12 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn reset_stay_aligned_pose(&mut self, pose: StayAlignedPose) -> Result<()> {
+    pub async fn reset_stay_aligned_pose(&mut self, pose: StayAlignedRelaxedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = ResetStayAlignedRelaxedPoseRequest::create(
                 &mut fbb,
-                &ResetStayAlignedRelaxedPoseRequestArgs {
-                    pose: match pose {
-                        StayAlignedPose::Standing => StayAlignedRelaxedPose::STANDING,
-                        StayAlignedPose::Sitting => StayAlignedRelaxedPose::SITTING,
-                        StayAlignedPose::Flat => StayAlignedRelaxedPose::FLAT,
-                    },
-                },
+                &ResetStayAlignedRelaxedPoseRequestArgs { pose },
             );
             RpcMessageHeader::create(
                 &mut fbb,
@@ -520,7 +522,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_height(&mut self) -> Result<HeightData> {
+    pub async fn get_height(&mut self) -> Result<owned::HeightResponse> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
@@ -539,31 +541,12 @@ impl SolarXRClient {
         let response = self
             .consume_message(&mut transaction.rx, RPC_TIMEOUT)
             .await?;
-        let response = response
-            .as_flatbuf()
-            .message_as_height_response()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "received message isn't a HeightResponse",
-                )
-            })?;
-        Ok(HeightData {
-            min: response.min_height(),
-            max: response.max_height(),
-        })
+        if response.as_flatbuf().message_type() != RpcMessage::HeightResponse {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "received message isn't a HeightResponse",
+            ));
+        }
+        Ok(owned::HeightResponse::new(response))
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum StayAlignedPose {
-    Standing,
-    Sitting,
-    Flat,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct HeightData {
-    pub min: f32,
-    pub max: f32,
 }

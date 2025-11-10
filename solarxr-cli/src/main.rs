@@ -2,18 +2,20 @@ use std::{env, io, path::PathBuf, process::ExitCode};
 
 use eyre::{Result, eyre};
 use serde_json::json;
-use solarxr_client::{BodyPart, SolarXRClient};
+use solarxr_client::SolarXRClient;
 use tokio::net::UnixStream;
 use tracing_subscriber::EnvFilter;
 
 mod cli;
 
-impl From<cli::StayAlignedPose> for solarxr_client::StayAlignedPose {
+use solarxr_client::proto;
+
+impl From<cli::StayAlignedPose> for proto::rpc::StayAlignedRelaxedPose {
     fn from(value: cli::StayAlignedPose) -> Self {
         match value {
-            cli::StayAlignedPose::Standing => solarxr_client::StayAlignedPose::Standing,
-            cli::StayAlignedPose::Sitting => solarxr_client::StayAlignedPose::Sitting,
-            cli::StayAlignedPose::Flat => solarxr_client::StayAlignedPose::Flat,
+            cli::StayAlignedPose::Standing => proto::rpc::StayAlignedRelaxedPose::STANDING,
+            cli::StayAlignedPose::Sitting => proto::rpc::StayAlignedRelaxedPose::SITTING,
+            cli::StayAlignedPose::Flat => proto::rpc::StayAlignedRelaxedPose::FLAT,
         }
     }
 }
@@ -131,7 +133,10 @@ async fn exec() -> Result<ExitCode> {
                 tokio::time::sleep(delay).await;
             }
             client
-                .reset_mounting_with_parts(&[BodyPart::LEFT_FOOT, BodyPart::RIGHT_FOOT])
+                .reset_mounting_with_parts(&[
+                    proto::datatypes::BodyPart::LEFT_FOOT,
+                    proto::datatypes::BodyPart::RIGHT_FOOT,
+                ])
                 .await?;
         }
         cli::Command::Reset {
@@ -143,36 +148,36 @@ async fn exec() -> Result<ExitCode> {
             }
             client
                 .reset_mounting_with_parts(&[
-                    BodyPart::LEFT_THUMB_METACARPAL,
-                    BodyPart::LEFT_THUMB_PROXIMAL,
-                    BodyPart::LEFT_THUMB_DISTAL,
-                    BodyPart::LEFT_INDEX_PROXIMAL,
-                    BodyPart::LEFT_INDEX_INTERMEDIATE,
-                    BodyPart::LEFT_INDEX_DISTAL,
-                    BodyPart::LEFT_MIDDLE_PROXIMAL,
-                    BodyPart::LEFT_MIDDLE_INTERMEDIATE,
-                    BodyPart::LEFT_MIDDLE_DISTAL,
-                    BodyPart::LEFT_RING_PROXIMAL,
-                    BodyPart::LEFT_RING_INTERMEDIATE,
-                    BodyPart::LEFT_RING_DISTAL,
-                    BodyPart::LEFT_LITTLE_PROXIMAL,
-                    BodyPart::LEFT_LITTLE_INTERMEDIATE,
-                    BodyPart::LEFT_LITTLE_DISTAL,
-                    BodyPart::RIGHT_THUMB_METACARPAL,
-                    BodyPart::RIGHT_THUMB_PROXIMAL,
-                    BodyPart::RIGHT_THUMB_DISTAL,
-                    BodyPart::RIGHT_INDEX_PROXIMAL,
-                    BodyPart::RIGHT_INDEX_INTERMEDIATE,
-                    BodyPart::RIGHT_INDEX_DISTAL,
-                    BodyPart::RIGHT_MIDDLE_PROXIMAL,
-                    BodyPart::RIGHT_MIDDLE_INTERMEDIATE,
-                    BodyPart::RIGHT_MIDDLE_DISTAL,
-                    BodyPart::RIGHT_RING_PROXIMAL,
-                    BodyPart::RIGHT_RING_INTERMEDIATE,
-                    BodyPart::RIGHT_RING_DISTAL,
-                    BodyPart::RIGHT_LITTLE_PROXIMAL,
-                    BodyPart::RIGHT_LITTLE_INTERMEDIATE,
-                    BodyPart::RIGHT_LITTLE_DISTAL,
+                    proto::datatypes::BodyPart::LEFT_THUMB_METACARPAL,
+                    proto::datatypes::BodyPart::LEFT_THUMB_PROXIMAL,
+                    proto::datatypes::BodyPart::LEFT_THUMB_DISTAL,
+                    proto::datatypes::BodyPart::LEFT_INDEX_PROXIMAL,
+                    proto::datatypes::BodyPart::LEFT_INDEX_INTERMEDIATE,
+                    proto::datatypes::BodyPart::LEFT_INDEX_DISTAL,
+                    proto::datatypes::BodyPart::LEFT_MIDDLE_PROXIMAL,
+                    proto::datatypes::BodyPart::LEFT_MIDDLE_INTERMEDIATE,
+                    proto::datatypes::BodyPart::LEFT_MIDDLE_DISTAL,
+                    proto::datatypes::BodyPart::LEFT_RING_PROXIMAL,
+                    proto::datatypes::BodyPart::LEFT_RING_INTERMEDIATE,
+                    proto::datatypes::BodyPart::LEFT_RING_DISTAL,
+                    proto::datatypes::BodyPart::LEFT_LITTLE_PROXIMAL,
+                    proto::datatypes::BodyPart::LEFT_LITTLE_INTERMEDIATE,
+                    proto::datatypes::BodyPart::LEFT_LITTLE_DISTAL,
+                    proto::datatypes::BodyPart::RIGHT_THUMB_METACARPAL,
+                    proto::datatypes::BodyPart::RIGHT_THUMB_PROXIMAL,
+                    proto::datatypes::BodyPart::RIGHT_THUMB_DISTAL,
+                    proto::datatypes::BodyPart::RIGHT_INDEX_PROXIMAL,
+                    proto::datatypes::BodyPart::RIGHT_INDEX_INTERMEDIATE,
+                    proto::datatypes::BodyPart::RIGHT_INDEX_DISTAL,
+                    proto::datatypes::BodyPart::RIGHT_MIDDLE_PROXIMAL,
+                    proto::datatypes::BodyPart::RIGHT_MIDDLE_INTERMEDIATE,
+                    proto::datatypes::BodyPart::RIGHT_MIDDLE_DISTAL,
+                    proto::datatypes::BodyPart::RIGHT_RING_PROXIMAL,
+                    proto::datatypes::BodyPart::RIGHT_RING_INTERMEDIATE,
+                    proto::datatypes::BodyPart::RIGHT_RING_DISTAL,
+                    proto::datatypes::BodyPart::RIGHT_LITTLE_PROXIMAL,
+                    proto::datatypes::BodyPart::RIGHT_LITTLE_INTERMEDIATE,
+                    proto::datatypes::BodyPart::RIGHT_LITTLE_DISTAL,
                 ])
                 .await?;
         }
@@ -223,18 +228,21 @@ async fn exec() -> Result<ExitCode> {
             command: cli::InfoCommand::Height { json },
         } => {
             let mut client = connect().await?;
-            let height = client.get_height().await?;
+            let msg = client.get_height().await?;
+            let msg = msg.as_flatbuf();
+            let min = msg.min_height();
+            let max = msg.max_height();
             if json {
                 println!(
                     "{}",
                     json!({
-                        "min": height.min,
-                        "max": height.max,
+                        "min": min,
+                        "max": max,
                     })
                 );
             } else {
-                println!("min: {}", height.min);
-                println!("max: {}", height.max);
+                println!("min: {}", min);
+                println!("max: {}", max);
             }
         }
     }
