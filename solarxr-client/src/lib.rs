@@ -282,6 +282,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         &mut self,
         reset_type: ResetType,
         body_parts: &[proto::datatypes::BodyPart],
+        delay: Option<Duration>,
     ) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let body_parts = Some(fbb.create_vector(body_parts));
@@ -291,6 +292,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
                 &ResetRequestArgs {
                     reset_type,
                     body_parts,
+                    delay: delay.map(|x| x.as_secs_f32()),
                 },
             );
             RpcMessageHeader::create(
@@ -309,7 +311,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn reset(&mut self, reset_type: ResetType) -> Result<()> {
+    async fn reset(&mut self, reset_type: ResetType, delay: Option<Duration>) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = ResetRequest::create(
@@ -317,6 +319,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
                 &ResetRequestArgs {
                     reset_type,
                     body_parts: None,
+                    delay: delay.map(|x| x.as_secs_f32()),
                 },
             );
             RpcMessageHeader::create(
@@ -337,8 +340,8 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
 macro_rules! impl_reset {
     ($name:ident; $reset_type:expr) => {
-        pub async fn $name(&mut self) -> Result<()> {
-            self.reset($reset_type).await
+        pub async fn $name(&mut self, delay: Option<Duration>) -> Result<()> {
+            self.reset($reset_type, delay).await
         }
     };
 }
@@ -346,8 +349,12 @@ macro_rules! impl_reset {
 macro_rules! impl_reset_with_parts {
     ($name:ident; $reset_type:expr) => {
         #[allow(dead_code)]
-        pub async fn $name(&mut self, body_parts: &[proto::datatypes::BodyPart]) -> Result<()> {
-            self.reset_with_parts($reset_type, body_parts).await
+        pub async fn $name(
+            &mut self,
+            body_parts: &[proto::datatypes::BodyPart],
+            delay: Option<Duration>,
+        ) -> Result<()> {
+            self.reset_with_parts($reset_type, body_parts, delay).await
         }
     };
 }

@@ -89,70 +89,21 @@ pub enum TrackingCommand {
 #[derive(clap::Subcommand)]
 pub enum ResetCommand {
     /// Request yaw reset
-    Yaw {
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    Yaw,
     /// Request mounting reset
-    Mounting {
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    Mounting,
     /// Request feet mounting reset
-    MountingFeet {
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    MountingFeet,
     /// Request finger mounting reset
-    MountingFingers {
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    MountingFingers,
     /// Request full reset
-    Full {
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    Full,
 }
 
 #[derive(clap::Subcommand)]
 pub enum StayAlignedCommand {
     /// Save "Stay Aligned" pose
-    SavePose {
-        pose: StayAlignedPose,
-        #[arg(
-            short = 'd',
-            long = "delay",
-            help = "Delay (seconds) before sending the command",
-            value_parser = parse_duration_secs,
-        )]
-        delay: Option<Duration>,
-    },
+    SavePose { pose: StayAlignedPose },
     /// Reset "Stay Aligned" pose
     ResetPose { pose: StayAlignedPose },
     /// Enable "Stay Aligned"
@@ -172,11 +123,25 @@ pub enum Command {
     },
     /// Perform tracker resets (yaw, full, mounting, etc.)
     Reset {
+        #[arg(
+            short = 'd',
+            long = "delay",
+            help = "Delay (seconds) before sending the command",
+            value_parser = parse_duration_secs,
+        )]
+        delay: Option<Duration>,
         #[command(subcommand)]
         command: ResetCommand,
     },
     /// Manage the configuration of "Stay Aligned"
     StayAligned {
+        #[arg(
+            short = 'd',
+            long = "delay",
+            help = "Delay (seconds) before sending the command",
+            value_parser = parse_duration_secs,
+        )]
+        delay: Option<Duration>,
         #[command(subcommand)]
         command: StayAlignedCommand,
     },

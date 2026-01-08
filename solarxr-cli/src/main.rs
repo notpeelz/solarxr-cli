@@ -107,90 +107,93 @@ async fn exec() -> Result<ExitCode> {
             }
         }
         cli::Command::Reset {
-            command: cli::ResetCommand::Yaw { delay },
+            command: cli::ResetCommand::Yaw,
+            delay,
         } => {
             let mut client = connect().await?;
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
-            client.reset_yaw().await?;
+            client.reset_yaw(delay).await?;
         }
         cli::Command::Reset {
-            command: cli::ResetCommand::Mounting { delay },
+            command: cli::ResetCommand::Mounting,
+            delay,
         } => {
             let mut client = connect().await?;
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
-            client.reset_mounting().await?;
+            client.reset_mounting(delay).await?;
         }
         cli::Command::Reset {
-            command: cli::ResetCommand::MountingFeet { delay },
+            command: cli::ResetCommand::MountingFeet,
+            delay,
+        } => {
+            let mut client = connect().await?;
+            client
+                .reset_mounting_with_parts(
+                    &[
+                        proto::datatypes::BodyPart::LEFT_FOOT,
+                        proto::datatypes::BodyPart::RIGHT_FOOT,
+                    ],
+                    delay,
+                )
+                .await?;
+        }
+        cli::Command::Reset {
+            command: cli::ResetCommand::MountingFingers,
+            delay,
         } => {
             let mut client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
             client
-                .reset_mounting_with_parts(&[
-                    proto::datatypes::BodyPart::LEFT_FOOT,
-                    proto::datatypes::BodyPart::RIGHT_FOOT,
-                ])
+                .reset_mounting_with_parts(
+                    &[
+                        proto::datatypes::BodyPart::LEFT_THUMB_METACARPAL,
+                        proto::datatypes::BodyPart::LEFT_THUMB_PROXIMAL,
+                        proto::datatypes::BodyPart::LEFT_THUMB_DISTAL,
+                        proto::datatypes::BodyPart::LEFT_INDEX_PROXIMAL,
+                        proto::datatypes::BodyPart::LEFT_INDEX_INTERMEDIATE,
+                        proto::datatypes::BodyPart::LEFT_INDEX_DISTAL,
+                        proto::datatypes::BodyPart::LEFT_MIDDLE_PROXIMAL,
+                        proto::datatypes::BodyPart::LEFT_MIDDLE_INTERMEDIATE,
+                        proto::datatypes::BodyPart::LEFT_MIDDLE_DISTAL,
+                        proto::datatypes::BodyPart::LEFT_RING_PROXIMAL,
+                        proto::datatypes::BodyPart::LEFT_RING_INTERMEDIATE,
+                        proto::datatypes::BodyPart::LEFT_RING_DISTAL,
+                        proto::datatypes::BodyPart::LEFT_LITTLE_PROXIMAL,
+                        proto::datatypes::BodyPart::LEFT_LITTLE_INTERMEDIATE,
+                        proto::datatypes::BodyPart::LEFT_LITTLE_DISTAL,
+                        proto::datatypes::BodyPart::RIGHT_THUMB_METACARPAL,
+                        proto::datatypes::BodyPart::RIGHT_THUMB_PROXIMAL,
+                        proto::datatypes::BodyPart::RIGHT_THUMB_DISTAL,
+                        proto::datatypes::BodyPart::RIGHT_INDEX_PROXIMAL,
+                        proto::datatypes::BodyPart::RIGHT_INDEX_INTERMEDIATE,
+                        proto::datatypes::BodyPart::RIGHT_INDEX_DISTAL,
+                        proto::datatypes::BodyPart::RIGHT_MIDDLE_PROXIMAL,
+                        proto::datatypes::BodyPart::RIGHT_MIDDLE_INTERMEDIATE,
+                        proto::datatypes::BodyPart::RIGHT_MIDDLE_DISTAL,
+                        proto::datatypes::BodyPart::RIGHT_RING_PROXIMAL,
+                        proto::datatypes::BodyPart::RIGHT_RING_INTERMEDIATE,
+                        proto::datatypes::BodyPart::RIGHT_RING_DISTAL,
+                        proto::datatypes::BodyPart::RIGHT_LITTLE_PROXIMAL,
+                        proto::datatypes::BodyPart::RIGHT_LITTLE_INTERMEDIATE,
+                        proto::datatypes::BodyPart::RIGHT_LITTLE_DISTAL,
+                    ],
+                    delay,
+                )
                 .await?;
         }
         cli::Command::Reset {
-            command: cli::ResetCommand::MountingFingers { delay },
+            command: cli::ResetCommand::Full,
+            delay,
         } => {
             let mut client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
-            client
-                .reset_mounting_with_parts(&[
-                    proto::datatypes::BodyPart::LEFT_THUMB_METACARPAL,
-                    proto::datatypes::BodyPart::LEFT_THUMB_PROXIMAL,
-                    proto::datatypes::BodyPart::LEFT_THUMB_DISTAL,
-                    proto::datatypes::BodyPart::LEFT_INDEX_PROXIMAL,
-                    proto::datatypes::BodyPart::LEFT_INDEX_INTERMEDIATE,
-                    proto::datatypes::BodyPart::LEFT_INDEX_DISTAL,
-                    proto::datatypes::BodyPart::LEFT_MIDDLE_PROXIMAL,
-                    proto::datatypes::BodyPart::LEFT_MIDDLE_INTERMEDIATE,
-                    proto::datatypes::BodyPart::LEFT_MIDDLE_DISTAL,
-                    proto::datatypes::BodyPart::LEFT_RING_PROXIMAL,
-                    proto::datatypes::BodyPart::LEFT_RING_INTERMEDIATE,
-                    proto::datatypes::BodyPart::LEFT_RING_DISTAL,
-                    proto::datatypes::BodyPart::LEFT_LITTLE_PROXIMAL,
-                    proto::datatypes::BodyPart::LEFT_LITTLE_INTERMEDIATE,
-                    proto::datatypes::BodyPart::LEFT_LITTLE_DISTAL,
-                    proto::datatypes::BodyPart::RIGHT_THUMB_METACARPAL,
-                    proto::datatypes::BodyPart::RIGHT_THUMB_PROXIMAL,
-                    proto::datatypes::BodyPart::RIGHT_THUMB_DISTAL,
-                    proto::datatypes::BodyPart::RIGHT_INDEX_PROXIMAL,
-                    proto::datatypes::BodyPart::RIGHT_INDEX_INTERMEDIATE,
-                    proto::datatypes::BodyPart::RIGHT_INDEX_DISTAL,
-                    proto::datatypes::BodyPart::RIGHT_MIDDLE_PROXIMAL,
-                    proto::datatypes::BodyPart::RIGHT_MIDDLE_INTERMEDIATE,
-                    proto::datatypes::BodyPart::RIGHT_MIDDLE_DISTAL,
-                    proto::datatypes::BodyPart::RIGHT_RING_PROXIMAL,
-                    proto::datatypes::BodyPart::RIGHT_RING_INTERMEDIATE,
-                    proto::datatypes::BodyPart::RIGHT_RING_DISTAL,
-                    proto::datatypes::BodyPart::RIGHT_LITTLE_PROXIMAL,
-                    proto::datatypes::BodyPart::RIGHT_LITTLE_INTERMEDIATE,
-                    proto::datatypes::BodyPart::RIGHT_LITTLE_DISTAL,
-                ])
-                .await?;
-        }
-        cli::Command::Reset {
-            command: cli::ResetCommand::Full { delay },
-        } => {
-            let mut client = connect().await?;
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
-            client.reset_full().await?;
+            client.reset_full(delay).await?;
         }
         cli::Command::StayAligned {
-            command: cli::StayAlignedCommand::SavePose { pose, delay },
+            command: cli::StayAlignedCommand::SavePose { pose },
+            delay,
         } => {
             let mut client = connect().await?;
             if let Some(delay) = delay {
@@ -200,26 +203,42 @@ async fn exec() -> Result<ExitCode> {
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::ResetPose { pose },
+            delay,
         } => {
             let mut client = connect().await?;
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             client.reset_stay_aligned_pose(pose.into()).await?;
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::Enable,
+            delay,
         } => {
             let mut client = connect().await?;
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             client.set_stay_aligned_enabled(true).await?;
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::Disable,
+            delay,
         } => {
             let mut client = connect().await?;
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             client.set_stay_aligned_enabled(false).await?;
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::Toggle,
+            delay,
         } => {
             let mut client = connect().await?;
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             let enabled = client.stay_aligned_enabled().await?;
             client.set_stay_aligned_enabled(!enabled).await?;
         }
