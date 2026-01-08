@@ -1,7 +1,6 @@
 use std::{env, io, path::PathBuf, process::ExitCode};
 
 use eyre::{Result, eyre};
-use serde_json::json;
 use solarxr_client::SolarXRClient;
 use tokio::net::UnixStream;
 use tracing_subscriber::EnvFilter;
@@ -223,27 +222,6 @@ async fn exec() -> Result<ExitCode> {
             let mut client = connect().await?;
             let enabled = client.stay_aligned_enabled().await?;
             client.set_stay_aligned_enabled(!enabled).await?;
-        }
-        cli::Command::Info {
-            command: cli::InfoCommand::Height { json },
-        } => {
-            let mut client = connect().await?;
-            let msg = client.get_height().await?;
-            let msg = msg.as_flatbuf();
-            let min = msg.min_height();
-            let max = msg.max_height();
-            if json {
-                println!(
-                    "{}",
-                    json!({
-                        "min": min,
-                        "max": max,
-                    })
-                );
-            } else {
-                println!("min: {}", min);
-                println!("max: {}", max);
-            }
         }
     }
     Ok(ExitCode::SUCCESS)

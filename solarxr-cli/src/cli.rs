@@ -164,15 +164,6 @@ pub enum StayAlignedCommand {
 }
 
 #[derive(clap::Subcommand)]
-pub enum InfoCommand {
-    /// Query the minimum and maximum positional tracker height
-    Height {
-        #[arg(short = 'j', long = "json", help = "Format output as JSON")]
-        json: bool,
-    },
-}
-
-#[derive(clap::Subcommand)]
 pub enum Command {
     /// Manage the tracking state
     Tracking {
@@ -188,10 +179,5 @@ pub enum Command {
     StayAligned {
         #[command(subcommand)]
         command: StayAlignedCommand,
-    },
-    /// Query miscellaneous information
-    Info {
-        #[command(subcommand)]
-        command: InfoCommand,
     },
 }
