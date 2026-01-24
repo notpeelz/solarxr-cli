@@ -32,7 +32,8 @@ async fn exec() -> Result<ExitCode> {
                     .map_err(|_| eyre!("env var XDG_RUNTIME_DIR not set"))?,
             );
             socket_paths.push(xdg_runtime_dir.join("SlimeVRRpc"));
-            socket_paths.push(xdg_runtime_dir.join("app/dev.slimevr.SlimeVR/SlimeVRRpc"));
+            socket_paths
+                .push(xdg_runtime_dir.join(".flatpak/dev.slimevr.SlimeVR/xdg-run/SlimeVRRpc"));
         }
         socket_paths
     };
