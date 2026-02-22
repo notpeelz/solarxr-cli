@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use clap::{ValueHint, arg, crate_version};
+use clap::{ValueHint, crate_version};
 
 // Cargo enforces semver, so have to resort to this hack to
 // strip the major version component.
