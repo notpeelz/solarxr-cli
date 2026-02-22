@@ -110,22 +110,25 @@ async fn exec() -> Result<ExitCode> {
         cli::Command::Reset {
             command: cli::ResetCommand::Yaw,
             delay,
+            wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
-            client.reset_yaw(delay).await?;
+            client.reset_yaw(delay, wait_until_finished).await?;
         }
         cli::Command::Reset {
             command: cli::ResetCommand::Mounting,
             delay,
+            wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
-            client.reset_mounting(delay).await?;
+            client.reset_mounting(delay, wait_until_finished).await?;
         }
         cli::Command::Reset {
             command: cli::ResetCommand::MountingFeet,
             delay,
+            wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
@@ -136,12 +139,14 @@ async fn exec() -> Result<ExitCode> {
                         proto::datatypes::BodyPart::RIGHT_FOOT,
                     ],
                     delay,
+                    wait_until_finished,
                 )
                 .await?;
         }
         cli::Command::Reset {
             command: cli::ResetCommand::MountingFingers,
             delay,
+            wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
@@ -180,16 +185,18 @@ async fn exec() -> Result<ExitCode> {
                         proto::datatypes::BodyPart::RIGHT_LITTLE_DISTAL,
                     ],
                     delay,
+                    wait_until_finished,
                 )
                 .await?;
         }
         cli::Command::Reset {
             command: cli::ResetCommand::Full,
             delay,
+            wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
-            client.reset_full(delay).await?;
+            client.reset_full(delay, wait_until_finished).await?;
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::SavePose { pose },

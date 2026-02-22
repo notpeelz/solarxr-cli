@@ -130,6 +130,8 @@ pub enum Command {
             value_parser = parse_duration_secs,
         )]
         delay: Option<Duration>,
+        #[arg(short = 'w', long = "wait", help = "Wait until the reset is finished")]
+        wait_until_finished: bool,
         #[command(subcommand)]
         command: ResetCommand,
     },

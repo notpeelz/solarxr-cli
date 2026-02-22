@@ -10,7 +10,7 @@ use solarxr_protocol::flatbuffers::{FlatBufferBuilder, WIPOffset};
 use solarxr_protocol::rpc::{
     DetectStayAlignedRelaxedPoseRequest, DetectStayAlignedRelaxedPoseRequestArgs,
     EnableStayAlignedRequest, EnableStayAlignedRequestArgs, HeightRequest, HeightRequestArgs,
-    ResetRequest, ResetRequestArgs, ResetStayAlignedRelaxedPoseRequest,
+    ResetRequest, ResetRequestArgs, ResetStatus, ResetStayAlignedRelaxedPoseRequest,
     ResetStayAlignedRelaxedPoseRequestArgs, ResetType, RpcMessage, RpcMessageHeader,
     RpcMessageHeaderArgs, SetPauseTrackingRequest, SetPauseTrackingRequestArgs, SettingsRequest,
     SettingsRequestArgs, StayAlignedRelaxedPose, TrackingPauseStateRequest,
@@ -283,8 +283,10 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         reset_type: ResetType,
         body_parts: &[proto::datatypes::BodyPart],
         delay: Duration,
+        wait_until_finished: bool,
     ) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
+        let mut transaction = self.new_transaction().await;
         let body_parts = Some(fbb.create_vector(body_parts));
         let m = {
             let m = ResetRequest::create(
@@ -298,7 +300,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: None,
+                    tx_id: Some(&transaction.id),
                     message_type: RpcMessage::ResetRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -307,12 +309,38 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         let data = create_rpc_msg(&mut fbb, &[m]);
         self.write(data).await?;
 
+        if wait_until_finished {
+            loop {
+                let response = self
+                    .consume_message(&mut transaction.rx, RPC_TIMEOUT + delay)
+                    .await?;
+                let response = response
+                    .as_flatbuf()
+                    .message_as_reset_response()
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "received message isn't a ResetResponse",
+                        )
+                    })?;
+                if response.status() == ResetStatus::FINISHED {
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn reset(&mut self, reset_type: ResetType, delay: Duration) -> Result<()> {
+    async fn reset(
+        &mut self,
+        reset_type: ResetType,
+        delay: Duration,
+        wait_until_finished: bool,
+    ) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
+        let mut transaction = self.new_transaction().await;
         let m = {
             let m = ResetRequest::create(
                 &mut fbb,
@@ -325,7 +353,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: None,
+                    tx_id: Some(&transaction.id),
                     message_type: RpcMessage::ResetRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -334,14 +362,34 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         let data = create_rpc_msg(&mut fbb, &[m]);
         self.write(data).await?;
 
+        if wait_until_finished {
+            loop {
+                let response = self
+                    .consume_message(&mut transaction.rx, RPC_TIMEOUT + delay)
+                    .await?;
+                let response = response
+                    .as_flatbuf()
+                    .message_as_reset_response()
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "received message isn't a ResetResponse",
+                        )
+                    })?;
+                if response.status() == ResetStatus::FINISHED {
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 }
 
 macro_rules! impl_reset {
     ($name:ident; $reset_type:expr) => {
-        pub async fn $name(&mut self, delay: Duration) -> Result<()> {
-            self.reset($reset_type, delay).await
+        pub async fn $name(&mut self, delay: Duration, wait_until_finished: bool) -> Result<()> {
+            self.reset($reset_type, delay, wait_until_finished).await
         }
     };
 }
@@ -353,8 +401,10 @@ macro_rules! impl_reset_with_parts {
             &mut self,
             body_parts: &[proto::datatypes::BodyPart],
             delay: Duration,
+            wait_until_finished: bool,
         ) -> Result<()> {
-            self.reset_with_parts($reset_type, body_parts, delay).await
+            self.reset_with_parts($reset_type, body_parts, delay, wait_until_finished)
+                .await
         }
     };
 }
