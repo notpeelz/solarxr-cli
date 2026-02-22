@@ -1,4 +1,4 @@
-use std::{env, io, path::PathBuf, process::ExitCode};
+use std::{env, io, path::PathBuf, process::ExitCode, time::Duration};
 
 use eyre::{Result, eyre};
 use solarxr_client::SolarXRClient;
@@ -111,6 +111,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::ResetCommand::Yaw,
             delay,
         } => {
+            let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
             client.reset_yaw(delay).await?;
         }
@@ -118,6 +119,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::ResetCommand::Mounting,
             delay,
         } => {
+            let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
             client.reset_mounting(delay).await?;
         }
@@ -125,6 +127,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::ResetCommand::MountingFeet,
             delay,
         } => {
+            let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
             client
                 .reset_mounting_with_parts(
@@ -140,6 +143,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::ResetCommand::MountingFingers,
             delay,
         } => {
+            let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
             client
                 .reset_mounting_with_parts(
@@ -183,6 +187,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::ResetCommand::Full,
             delay,
         } => {
+            let delay = delay.unwrap_or(Duration::ZERO);
             let mut client = connect().await?;
             client.reset_full(delay).await?;
         }
