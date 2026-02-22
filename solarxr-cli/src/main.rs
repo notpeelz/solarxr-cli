@@ -141,9 +141,6 @@ async fn exec() -> Result<ExitCode> {
             delay,
         } => {
             let mut client = connect().await?;
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
             client
                 .reset_mounting_with_parts(
                     &[
@@ -187,9 +184,6 @@ async fn exec() -> Result<ExitCode> {
             delay,
         } => {
             let mut client = connect().await?;
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
             client.reset_full(delay).await?;
         }
         cli::Command::StayAligned {
