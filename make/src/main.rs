@@ -202,7 +202,10 @@ fn main() -> Result<()> {
             match dest.metadata() {
                 Ok(m) => {
                     if m.is_dir() {
-                        let is_dir_empty = dest.read_dir().iter().next().is_none();
+                        let mut entries = dest
+                            .read_dir()
+                            .wrap_err("failed to enumerate entries in output dir")?;
+                        let is_dir_empty = entries.next().is_none();
                         if !is_dir_empty {
                             bail!("output dir isn't empty");
                         }
