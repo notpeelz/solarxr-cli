@@ -198,15 +198,25 @@ pub enum Command {
     },
 }
 
-fn install_dir<P: AsRef<Path>>(path: P, perm: u32) -> io::Result<()> {
-    fs::create_dir_all(&path)?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(perm))?;
+fn install_dir<P: AsRef<Path>>(root: P, path: P, perm: u32) -> io::Result<()> {
+    fs::create_dir_all(root.as_ref().join(&path))?;
+    let mut subpath = root.as_ref().to_path_buf();
+    for part in path.as_ref().components() {
+        subpath.push(part);
+        fs::set_permissions(&subpath, fs::Permissions::from_mode(perm))?;
+    }
     Ok(())
 }
 
-fn install_file<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q, perm: u32) -> io::Result<()> {
-    fs::copy(&src, &dest)?;
-    fs::set_permissions(&dest, fs::Permissions::from_mode(perm))?;
+fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
+    src: P,
+    dest_root: D,
+    dest: Q,
+    perm: u32,
+) -> io::Result<()> {
+    let dest_path = dest_root.as_ref().join(&dest);
+    fs::copy(&src, &dest_path)?;
+    fs::set_permissions(&dest_path, fs::Permissions::from_mode(perm))?;
     Ok(())
 }
 
@@ -243,60 +253,72 @@ fn main() -> Result<()> {
             };
             let artifacts = build(&build_args)?;
 
-            let bin_dir = dest.join("bin");
-            install_dir(&bin_dir, 0o755)?;
-            install_file(artifacts.cli_exe, bin_dir.join("solarxr-cli"), 0o755)?;
-            install_file(artifacts.input_exe, bin_dir.join("solarxr-input"), 0o755)?;
+            let bin_dir = PathBuf::from("bin");
+            install_dir(&dest, &bin_dir, 0o755)?;
+            install_file(artifacts.cli_exe, &dest, bin_dir.join("solarxr-cli"), 0o755)?;
+            install_file(
+                artifacts.input_exe,
+                &dest,
+                bin_dir.join("solarxr-input"),
+                0o755,
+            )?;
 
-            let share_dir = dest.join("share");
-            install_dir(&share_dir, 0o755)?;
+            let share_dir = PathBuf::from("share");
+            install_dir(&dest, &share_dir, 0o755)?;
 
             let bash_comp_dir = share_dir.join("bash-completion/completions");
-            install_dir(&bash_comp_dir, 0o755)?;
+            install_dir(&dest, &bash_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("solarxr-cli.bash"),
+                &dest,
                 bash_comp_dir.join("solarxr-cli"),
                 0o644,
             )?;
             install_file(
                 artifacts.input_build_out_dir.join("solarxr-input.bash"),
+                &dest,
                 bash_comp_dir.join("solarxr-input"),
                 0o644,
             )?;
 
             let zsh_comp_dir = share_dir.join("zsh/site-functions");
-            install_dir(&zsh_comp_dir, 0o755)?;
+            install_dir(&dest, &zsh_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("_solarxr-cli"),
+                &dest,
                 zsh_comp_dir.join("_solarxr_cli"),
                 0o644,
             )?;
             install_file(
                 artifacts.input_build_out_dir.join("_solarxr-input"),
+                &dest,
                 zsh_comp_dir.join("_solarxr_input"),
                 0o644,
             )?;
 
             let fish_comp_dir = share_dir.join("fish/vendor_completions.d");
-            install_dir(&fish_comp_dir, 0o755)?;
+            install_dir(&dest, &fish_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("solarxr-cli.fish"),
+                &dest,
                 fish_comp_dir.join("solarxr-cli.fish"),
                 0o644,
             )?;
             install_file(
                 artifacts.input_build_out_dir.join("solarxr-input.fish"),
+                &dest,
                 fish_comp_dir.join("solarxr-input.fish"),
                 0o644,
             )?;
 
-            let etc_dir = dest.join("etc");
-            install_dir(&etc_dir, 0o755)?;
+            let etc_dir = PathBuf::from("etc");
+            install_dir(&dest, &etc_dir, 0o755)?;
 
             let etc_xdg_input_dir = etc_dir.join("xdg/solarxr-input");
-            install_dir(&etc_xdg_input_dir, 0o755)?;
+            install_dir(&dest, &etc_xdg_input_dir, 0o755)?;
             install_file(
                 project_root.join("solarxr-input/config.json"),
+                &dest,
                 etc_xdg_input_dir.join("config.json"),
                 0o644,
             )?;
