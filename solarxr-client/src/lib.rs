@@ -1,6 +1,8 @@
 use std::cell::LazyCell;
 use std::collections::HashMap;
+use std::env;
 use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -199,8 +201,55 @@ impl<const BUF_SIZE: usize> Drop for SolarXRClient<BUF_SIZE> {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum SolarXRError {
+    #[error("socket file doesn't exist; is the server running?")]
+    SocketFileNotFound,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
 impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
-    pub fn new(stream: UnixStream) -> Self {
+    async fn from_socket_paths<P: AsRef<Path>>(socket_paths: &[P]) -> Result<Self, SolarXRError> {
+        assert!(!socket_paths.is_empty());
+        let mut socket_paths = socket_paths.iter();
+        let mut last_err = Option::<SolarXRError>::None;
+        let stream = 'f: loop {
+            let Some(socket_path) = socket_paths.next() else {
+                break 'f Err(last_err.unwrap());
+            };
+            match UnixStream::connect(socket_path).await {
+                Ok(stream) => break 'f Ok(stream),
+                Err(err) => {
+                    if err.kind() == io::ErrorKind::NotFound {
+                        last_err = Some(SolarXRError::SocketFileNotFound);
+                    } else {
+                        last_err = Some(err.into());
+                    }
+                }
+            };
+        }?;
+        Self::from_stream(stream).await
+    }
+
+    pub async fn from_default_socket_paths() -> Result<Self, SolarXRError> {
+        let mut socket_paths = Vec::<PathBuf>::new();
+        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+            let xdg_runtime_dir = PathBuf::from(xdg_runtime_dir);
+            socket_paths.push(xdg_runtime_dir.join("SlimeVRRpc"));
+            socket_paths
+                .push(xdg_runtime_dir.join(".flatpak/dev.slimevr.SlimeVR/xdg-run/SlimeVRRpc"));
+        } else {
+            return Err(SolarXRError::SocketFileNotFound);
+        }
+        Self::from_socket_paths(&socket_paths).await
+    }
+
+    pub async fn from_socket_path<P: AsRef<Path>>(socket_path: P) -> Result<Self, SolarXRError> {
+        Self::from_socket_paths(&[socket_path]).await
+    }
+
+    pub async fn from_stream(stream: UnixStream) -> Result<Self, SolarXRError> {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (stream_reader, stream_writer) = stream.into_split();
         let state = Arc::new(ClientState {
@@ -230,10 +279,10 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             }
         });
 
-        Self {
+        Ok(Self {
             state,
             pump_task: Some((pump_task, shutdown_tx)),
-        }
+        })
     }
 
     #[instrument(level = "trace", skip_all)]

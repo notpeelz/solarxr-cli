@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 solarxr-protocol = { path = "../solarxr-protocol/protocol/rust", package = "solarxr_protocol" }
+thiserror = "2.0.18"
 tokio = { version = "1.47.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1.41"

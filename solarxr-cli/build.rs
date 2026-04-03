@@ -1,5 +1,6 @@
 use clap_complete::{generate_to, shells::Shell};
-use std::{env, io};
+use std::env;
+use std::io;
 
 include!("src/cli.rs");
 

@@ -1,8 +1,11 @@
-use std::{env, io, path::PathBuf, process::ExitCode, time::Duration};
+use std::env;
+use std::io;
+use std::process::ExitCode;
+use std::time::Duration;
 
-use eyre::{Result, eyre};
+use eyre::Result;
 use solarxr_client::SolarXRClient;
-use tokio::net::UnixStream;
+use solarxr_client::SolarXRError;
 use tracing_subscriber::EnvFilter;
 
 mod cli;
@@ -22,43 +25,12 @@ impl From<cli::StayAlignedPose> for proto::rpc::StayAlignedRelaxedPose {
 async fn exec() -> Result<ExitCode> {
     let args = <crate::cli::Args as clap::Parser>::parse();
 
-    let socket_paths = {
-        let mut socket_paths = Vec::<PathBuf>::new();
+    let connect = async || -> Result<SolarXRClient, SolarXRError> {
         if let Some(socket_path) = args.socket_path {
-            socket_paths.push(socket_path);
+            SolarXRClient::from_socket_path(socket_path).await
         } else {
-            let xdg_runtime_dir = PathBuf::from(
-                env::var("XDG_RUNTIME_DIR")
-                    .map_err(|_| eyre!("env var XDG_RUNTIME_DIR not set"))?,
-            );
-            socket_paths.push(xdg_runtime_dir.join("SlimeVRRpc"));
-            socket_paths
-                .push(xdg_runtime_dir.join(".flatpak/dev.slimevr.SlimeVR/xdg-run/SlimeVRRpc"));
+            SolarXRClient::from_default_socket_paths().await
         }
-        socket_paths
-    };
-
-    let connect = async || -> Result<SolarXRClient> {
-        assert!(!socket_paths.is_empty());
-        let mut socket_paths = socket_paths.iter();
-        let mut last_err = Option::<eyre::Error>::None;
-        let stream = 'f: loop {
-            let Some(socket_path) = socket_paths.next() else {
-                break 'f Err(last_err.unwrap());
-            };
-            match UnixStream::connect(socket_path).await {
-                Ok(stream) => break 'f Ok(stream),
-                Err(err) => {
-                    if err.kind() == io::ErrorKind::NotFound {
-                        last_err = Some(eyre!("socket file doesn't exist; is the server running?"));
-                    } else {
-                        last_err = Some(err.into());
-                    }
-                }
-            };
-        }?;
-        let client = SolarXRClient::new(stream);
-        Ok(client)
     };
 
     match args.command {
