@@ -286,7 +286,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
     }
 
     #[instrument(level = "trace", skip_all)]
-    async fn write(&mut self, data: &[u8]) -> Result<()> {
+    async fn write(&self, data: &[u8]) -> Result<()> {
         let len = (data.len() as u32 + 4).to_le_bytes();
         let mut stream = self.state.stream_writer.lock().await;
         trace!("sending message to server");
@@ -316,7 +316,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
     #[instrument(level = "trace", skip(self))]
     async fn consume_message(
-        &mut self,
+        &self,
         rx: &mut mpsc::Receiver<owned::RpcMessageHeader>,
         timeout: Duration,
     ) -> Result<owned::RpcMessageHeader> {
@@ -328,7 +328,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
     #[instrument(level = "trace", skip(self))]
     async fn reset_with_parts(
-        &mut self,
+        &self,
         reset_type: ResetType,
         body_parts: &[proto::datatypes::BodyPart],
         delay: Duration,
@@ -383,7 +383,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
     #[instrument(level = "trace", skip(self))]
     async fn reset(
-        &mut self,
+        &self,
         reset_type: ResetType,
         delay: Duration,
         wait_until_finished: bool,
@@ -438,7 +438,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 macro_rules! impl_reset {
     ($name:ident; $reset_type:expr) => {
         #[instrument(level = "trace", skip(self))]
-        pub async fn $name(&mut self, delay: Duration, wait_until_finished: bool) -> Result<()> {
+        pub async fn $name(&self, delay: Duration, wait_until_finished: bool) -> Result<()> {
             self.reset($reset_type, delay, wait_until_finished).await
         }
     };
@@ -449,7 +449,7 @@ macro_rules! impl_reset_with_parts {
         #[allow(dead_code)]
         #[instrument(level = "trace", skip(self))]
         pub async fn $name(
-            &mut self,
+            &self,
             body_parts: &[proto::datatypes::BodyPart],
             delay: Duration,
             wait_until_finished: bool,
@@ -469,7 +469,7 @@ impl SolarXRClient {
     impl_reset_with_parts!(reset_full_with_parts; ResetType::Full);
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn pause_tracking_state(&mut self) -> Result<bool> {
+    pub async fn pause_tracking_state(&self) -> Result<bool> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
@@ -504,7 +504,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn set_pause_tracking(&mut self, state: bool) -> Result<()> {
+    pub async fn set_pause_tracking(&self, state: bool) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = SetPauseTrackingRequest::create(
@@ -528,7 +528,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn save_stay_aligned_pose(&mut self, pose: StayAlignedRelaxedPose) -> Result<()> {
+    pub async fn save_stay_aligned_pose(&self, pose: StayAlignedRelaxedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = DetectStayAlignedRelaxedPoseRequest::create(
@@ -550,7 +550,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn reset_stay_aligned_pose(&mut self, pose: StayAlignedRelaxedPose) -> Result<()> {
+    pub async fn reset_stay_aligned_pose(&self, pose: StayAlignedRelaxedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = ResetStayAlignedRelaxedPoseRequest::create(
@@ -572,7 +572,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn set_stay_aligned_enabled(&mut self, enabled: bool) -> Result<()> {
+    pub async fn set_stay_aligned_enabled(&self, enabled: bool) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
             let m = EnableStayAlignedRequest::create(
@@ -594,7 +594,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn stay_aligned_enabled(&mut self) -> Result<bool> {
+    pub async fn stay_aligned_enabled(&self) -> Result<bool> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
@@ -630,7 +630,7 @@ impl SolarXRClient {
     }
 
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_height(&mut self) -> Result<owned::HeightResponse> {
+    pub async fn get_height(&self) -> Result<owned::HeightResponse> {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {

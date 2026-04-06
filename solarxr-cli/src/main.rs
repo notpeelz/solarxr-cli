@@ -37,19 +37,19 @@ async fn exec() -> Result<ExitCode> {
         cli::Command::Tracking {
             command: cli::TrackingCommand::Pause,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             client.set_pause_tracking(true).await?;
         }
         cli::Command::Tracking {
             command: cli::TrackingCommand::Unpause,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             client.set_pause_tracking(false).await?;
         }
         cli::Command::Tracking {
             command: cli::TrackingCommand::Toggle,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             let paused = client.pause_tracking_state().await?;
             client.set_pause_tracking(!paused).await?;
         }
@@ -61,7 +61,7 @@ async fn exec() -> Result<ExitCode> {
                     quiet,
                 },
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             let paused = client.pause_tracking_state().await?;
             if paused {
                 if !quiet {
@@ -85,7 +85,7 @@ async fn exec() -> Result<ExitCode> {
             wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
-            let mut client = connect().await?;
+            let client = connect().await?;
             client.reset_yaw(delay, wait_until_finished).await?;
         }
         cli::Command::Reset {
@@ -94,7 +94,7 @@ async fn exec() -> Result<ExitCode> {
             wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
-            let mut client = connect().await?;
+            let client = connect().await?;
             client.reset_mounting(delay, wait_until_finished).await?;
         }
         cli::Command::Reset {
@@ -103,7 +103,7 @@ async fn exec() -> Result<ExitCode> {
             wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
-            let mut client = connect().await?;
+            let client = connect().await?;
             client
                 .reset_mounting_with_parts(
                     &[
@@ -121,7 +121,7 @@ async fn exec() -> Result<ExitCode> {
             wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
-            let mut client = connect().await?;
+            let client = connect().await?;
             client
                 .reset_mounting_with_parts(
                     &[
@@ -167,14 +167,14 @@ async fn exec() -> Result<ExitCode> {
             wait_until_finished,
         } => {
             let delay = delay.unwrap_or(Duration::ZERO);
-            let mut client = connect().await?;
+            let client = connect().await?;
             client.reset_full(delay, wait_until_finished).await?;
         }
         cli::Command::StayAligned {
             command: cli::StayAlignedCommand::SavePose { pose },
             delay,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
@@ -184,7 +184,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::StayAlignedCommand::ResetPose { pose },
             delay,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
@@ -194,7 +194,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::StayAlignedCommand::Enable,
             delay,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
@@ -204,7 +204,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::StayAlignedCommand::Disable,
             delay,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
@@ -214,7 +214,7 @@ async fn exec() -> Result<ExitCode> {
             command: cli::StayAlignedCommand::Toggle,
             delay,
         } => {
-            let mut client = connect().await?;
+            let client = connect().await?;
             if let Some(delay) = delay {
                 tokio::time::sleep(delay).await;
             }
