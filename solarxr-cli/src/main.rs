@@ -222,6 +222,7 @@ async fn exec() -> Result<ExitCode> {
             client.set_stay_aligned_enabled(!enabled).await?;
         }
     }
+
     Ok(ExitCode::SUCCESS)
 }
 

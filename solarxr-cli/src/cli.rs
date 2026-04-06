@@ -33,8 +33,9 @@ const VERSION: &str = format_version(crate_version!());
 pub struct Args {
     #[arg(
         short = 's',
-        long = "socket-path",
+        long = "socket",
         help = "Use a different socket instead of the default",
+        value_name = "FILE",
         value_hint = ValueHint::FilePath
     )]
     pub socket_path: Option<PathBuf>,
