@@ -11,6 +11,8 @@ use tracing_subscriber::EnvFilter;
 mod cli;
 
 use solarxr_client::proto;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 impl From<cli::StayAlignedPose> for proto::rpc::StayAlignedRelaxedPose {
     fn from(value: cli::StayAlignedPose) -> Self {
@@ -235,11 +237,15 @@ const DEFAULT_LOG_FILTER: &str = "solarxr_cli=info,solarxr_client=info";
 fn main() -> ExitCode {
     let directives = env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_owned());
     let env_filter = EnvFilter::builder().parse_lossy(directives);
-    tracing_subscriber::fmt()
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
         .without_time()
-        .with_writer(io::stderr)
-        .with_env_filter(env_filter)
+        .with_writer(io::stderr);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
         .init();
 
     tokio::runtime::Builder::new_multi_thread()
