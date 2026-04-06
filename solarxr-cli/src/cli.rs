@@ -1,32 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
-use clap::{ValueHint, crate_version};
-
-// Cargo enforces semver, so have to resort to this hack to
-// strip the major version component.
-const fn format_version(s: &str) -> &str {
-    assert!(s.is_ascii());
-    let mut bytes = s.as_bytes();
-    let mut dot_count = 0;
-    loop {
-        match bytes {
-            [] => panic!("invalid version string"),
-            [b'.', remaining @ ..] => {
-                dot_count += 1;
-                bytes = remaining;
-            }
-            [..] if dot_count == 1 => {
-                break;
-            }
-            [_, remaining @ ..] => {
-                bytes = remaining;
-            }
-        }
-    }
-    unsafe { str::from_utf8_unchecked(bytes) }
-}
-
-const VERSION: &str = format_version(crate_version!());
+use clap::ValueHint;
+use solarxr_common::VERSION;
 
 #[derive(clap::Parser)]
 #[command(version = VERSION, about)]

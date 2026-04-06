@@ -1,11 +1,10 @@
-use std::{
-    env, fs,
-    io::{self, BufRead, BufReader},
-    ops::Deref,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::env;
+use std::fs;
+use std::io::{self, BufRead};
+use std::ops::Deref;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use eyre::{Context, Result, bail, eyre};
 
@@ -73,12 +72,15 @@ impl CargoMetadata {
 
 struct BuildArtifacts {
     cli_build_out_dir: PathBuf,
+    input_build_out_dir: PathBuf,
     cli_exe: PathBuf,
+    input_exe: PathBuf,
 }
 
 fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
     let metadata = cargo_metadata();
-    let package_id = metadata.get_package_id("solarxr-cli")?;
+    let cli_package_id = metadata.get_package_id("solarxr-cli")?;
+    let input_package_id = metadata.get_package_id("solarxr-input")?;
 
     let mut cmd = std::process::Command::new(cargo_path())
         .args(
@@ -88,6 +90,8 @@ fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
                 "json-render-diagnostics",
                 "-p",
                 "solarxr-cli",
+                "-p",
+                "solarxr-input",
             ]
             .iter()
             .map(Deref::deref)
@@ -101,10 +105,12 @@ fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
         .stdout
         .take()
         .ok_or_else(|| eyre!("failed to capture cargo stdout"))?;
-    let reader = BufReader::new(stdout);
+    let reader = io::BufReader::new(stdout);
 
     let mut cli_build_out_dir: Option<PathBuf> = None;
+    let mut input_build_out_dir: Option<PathBuf> = None;
     let mut cli_exe: Option<PathBuf> = None;
+    let mut input_exe: Option<PathBuf> = None;
 
     let mut seen_compiler_message = false;
     for line in reader.lines() {
@@ -126,12 +132,20 @@ fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
             }
         };
         match msg {
-            Message::BuildScriptExecuted(msg) if msg.package_id == package_id => {
+            Message::BuildScriptExecuted(msg) if msg.package_id == cli_package_id => {
                 cli_build_out_dir = Some(PathBuf::from(msg.out_dir));
+            }
+            Message::BuildScriptExecuted(msg) if msg.package_id == input_package_id => {
+                input_build_out_dir = Some(PathBuf::from(msg.out_dir));
             }
             Message::CompilerArtifact(artifact) if artifact.target.name == "solarxr-cli" => {
                 if let Some(exe) = artifact.executable {
                     cli_exe = Some(PathBuf::from(exe));
+                }
+            }
+            Message::CompilerArtifact(artifact) if artifact.target.name == "solarxr-input" => {
+                if let Some(exe) = artifact.executable {
+                    input_exe = Some(PathBuf::from(exe));
                 }
             }
             _ => {}
@@ -151,11 +165,16 @@ fn build<S: AsRef<str>>(args: &[S]) -> Result<BuildArtifacts> {
 
     let cli_build_out_dir = cli_build_out_dir
         .ok_or_else(|| eyre!("couldn't find solarxr-cli build script output dir"))?;
+    let input_build_out_dir = input_build_out_dir
+        .ok_or_else(|| eyre!("couldn't find solarxr-input build script output dir"))?;
     let cli_exe = cli_exe.ok_or_else(|| eyre!("couldn't find solarxr-cli binary"))?;
+    let input_exe = input_exe.ok_or_else(|| eyre!("couldn't find solarxr-input binary"))?;
 
     Ok(BuildArtifacts {
         cli_build_out_dir,
+        input_build_out_dir,
         cli_exe,
+        input_exe,
     })
 }
 
@@ -217,36 +236,68 @@ fn main() -> Result<()> {
                 }
             }
 
-            let build_artifacts = build(&build_args)?;
+            let project_root = {
+                let mut p = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+                p.pop();
+                p
+            };
+            let artifacts = build(&build_args)?;
 
             let bin_dir = dest.join("bin");
             install_dir(&bin_dir, 0o755)?;
-            install_file(build_artifacts.cli_exe, bin_dir.join("solarxr-cli"), 0o755)?;
+            install_file(artifacts.cli_exe, bin_dir.join("solarxr-cli"), 0o755)?;
+            install_file(artifacts.input_exe, bin_dir.join("solarxr-input"), 0o755)?;
 
             let share_dir = dest.join("share");
             install_dir(&share_dir, 0o755)?;
 
-            let bash_completions_dir = share_dir.join("bash-completion/completions");
-            install_dir(&bash_completions_dir, 0o755)?;
+            let bash_comp_dir = share_dir.join("bash-completion/completions");
+            install_dir(&bash_comp_dir, 0o755)?;
             install_file(
-                build_artifacts.cli_build_out_dir.join("solarxr-cli.bash"),
-                bash_completions_dir.join("solarxr-cli"),
+                artifacts.cli_build_out_dir.join("solarxr-cli.bash"),
+                bash_comp_dir.join("solarxr-cli"),
+                0o644,
+            )?;
+            install_file(
+                artifacts.input_build_out_dir.join("solarxr-input.bash"),
+                bash_comp_dir.join("solarxr-input"),
                 0o644,
             )?;
 
-            let zsh_completions_dir = share_dir.join("zsh/site-functions");
-            install_dir(&zsh_completions_dir, 0o755)?;
+            let zsh_comp_dir = share_dir.join("zsh/site-functions");
+            install_dir(&zsh_comp_dir, 0o755)?;
             install_file(
-                build_artifacts.cli_build_out_dir.join("_solarxr-cli"),
-                zsh_completions_dir.join("_solarxr_cli"),
+                artifacts.cli_build_out_dir.join("_solarxr-cli"),
+                zsh_comp_dir.join("_solarxr_cli"),
+                0o644,
+            )?;
+            install_file(
+                artifacts.input_build_out_dir.join("_solarxr-input"),
+                zsh_comp_dir.join("_solarxr_input"),
                 0o644,
             )?;
 
-            let fish_completions_dir = share_dir.join("fish/vendor_completions.d");
-            install_dir(&fish_completions_dir, 0o755)?;
+            let fish_comp_dir = share_dir.join("fish/vendor_completions.d");
+            install_dir(&fish_comp_dir, 0o755)?;
             install_file(
-                build_artifacts.cli_build_out_dir.join("solarxr-cli.fish"),
-                fish_completions_dir.join("solarxr-cli.fish"),
+                artifacts.cli_build_out_dir.join("solarxr-cli.fish"),
+                fish_comp_dir.join("solarxr-cli.fish"),
+                0o644,
+            )?;
+            install_file(
+                artifacts.input_build_out_dir.join("solarxr-input.fish"),
+                fish_comp_dir.join("solarxr-input.fish"),
+                0o644,
+            )?;
+
+            let etc_dir = dest.join("etc");
+            install_dir(&etc_dir, 0o755)?;
+
+            let etc_xdg_input_dir = etc_dir.join("xdg/solarxr-input");
+            install_dir(&etc_xdg_input_dir, 0o755)?;
+            install_file(
+                project_root.join("solarxr-input/config.json"),
+                etc_xdg_input_dir.join("config.json"),
                 0o644,
             )?;
 
