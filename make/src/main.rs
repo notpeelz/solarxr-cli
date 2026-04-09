@@ -193,15 +193,29 @@ pub enum Command {
     },
     Install {
         dest: PathBuf,
+        #[arg(long = "prefix", default_value = "/usr")]
+        prefix: PathBuf,
+        #[arg(long = "sysconfdir", default_value = "/etc")]
+        sysconfdir: PathBuf,
         #[arg(last = true)]
         build_args: Vec<String>,
     },
 }
 
 fn install_dir<P: AsRef<Path>>(root: P, path: P, perm: u32) -> io::Result<()> {
-    fs::create_dir_all(root.as_ref().join(&path))?;
-    let mut subpath = root.as_ref().to_path_buf();
-    for part in path.as_ref().components() {
+    let root = root.as_ref();
+    let path = {
+        let path = path.as_ref();
+        if path.is_absolute() {
+            path.strip_prefix("/").unwrap()
+        } else {
+            path
+        }
+    };
+
+    fs::create_dir_all(root.join(&path))?;
+    let mut subpath = root.to_path_buf();
+    for part in path.components() {
         subpath.push(part);
         fs::set_permissions(&subpath, fs::Permissions::from_mode(perm))?;
     }
@@ -210,13 +224,23 @@ fn install_dir<P: AsRef<Path>>(root: P, path: P, perm: u32) -> io::Result<()> {
 
 fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
     src: P,
-    dest_root: D,
-    dest: Q,
+    root: D,
+    path: Q,
     perm: u32,
 ) -> io::Result<()> {
-    let dest_path = dest_root.as_ref().join(&dest);
-    fs::copy(&src, &dest_path)?;
-    fs::set_permissions(&dest_path, fs::Permissions::from_mode(perm))?;
+    let path = {
+        let path = path.as_ref();
+        if path.is_absolute() {
+            path.strip_prefix("/").unwrap()
+        } else {
+            path
+        }
+    };
+
+    let root = root.as_ref();
+    let dest = root.join(&path);
+    fs::copy(&src, &dest)?;
+    fs::set_permissions(&dest, fs::Permissions::from_mode(perm))?;
     Ok(())
 }
 
@@ -227,7 +251,12 @@ fn main() -> Result<()> {
             build(&build_args)?;
             Ok(())
         }
-        Command::Install { dest, build_args } => {
+        Command::Install {
+            dest,
+            prefix,
+            sysconfdir,
+            build_args,
+        } => {
             match dest.metadata() {
                 Ok(m) => {
                     if m.is_dir() {
@@ -253,7 +282,7 @@ fn main() -> Result<()> {
             };
             let artifacts = build(&build_args)?;
 
-            let bin_dir = PathBuf::from("bin");
+            let bin_dir = prefix.join("bin");
             install_dir(&dest, &bin_dir, 0o755)?;
             install_file(artifacts.cli_exe, &dest, bin_dir.join("solarxr-cli"), 0o755)?;
             install_file(
@@ -263,7 +292,7 @@ fn main() -> Result<()> {
                 0o755,
             )?;
 
-            let share_dir = PathBuf::from("share");
+            let share_dir = prefix.join("share");
             install_dir(&dest, &share_dir, 0o755)?;
 
             let bash_comp_dir = share_dir.join("bash-completion/completions");
@@ -311,7 +340,7 @@ fn main() -> Result<()> {
                 0o644,
             )?;
 
-            let etc_dir = PathBuf::from("etc");
+            let etc_dir = sysconfdir;
             install_dir(&dest, &etc_dir, 0o755)?;
 
             let etc_xdg_input_dir = etc_dir.join("xdg/solarxr-input");
