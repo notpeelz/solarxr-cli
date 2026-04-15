@@ -20,7 +20,10 @@ rustPlatform.buildRustPackage {
     (pkgs.writeShellScriptBin "cargo" ''
       if [[ "$#" -ge 1 && "$1" == "build" ]]; then
         shift 1
-        exec ${pkgs.cargo}/bin/cargo make install build -- "$@"
+        exec ${pkgs.cargo}/bin/cargo make install \
+          --prefix "/" \
+          --sysconfdir "/etc" \
+          build -- "$@"
       else
         exec ${pkgs.cargo}/bin/cargo "$@"
       fi
