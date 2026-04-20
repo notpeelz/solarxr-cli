@@ -202,8 +202,12 @@ pub enum Command {
     },
 }
 
-fn install_dir<P: AsRef<Path>>(root: P, path: P, perm: u32) -> io::Result<()> {
+fn install_dir<P: AsRef<Path>, D: AsRef<Path>>(root: P, path: D, perm: u32) -> io::Result<()> {
     let root = root.as_ref();
+    if !root.is_absolute() || !root.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "invalid root dir"));
+    }
+
     let path = {
         let path = path.as_ref();
         if path.is_absolute() {
@@ -213,11 +217,18 @@ fn install_dir<P: AsRef<Path>>(root: P, path: P, perm: u32) -> io::Result<()> {
         }
     };
 
-    fs::create_dir_all(root.join(&path))?;
     let mut subpath = root.to_path_buf();
     for part in path.components() {
         subpath.push(part);
-        fs::set_permissions(&subpath, fs::Permissions::from_mode(perm))?;
+        match fs::create_dir(root.join(&subpath)).err() {
+            Some(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Some(err) => {
+                return Err(err);
+            }
+            None => {
+                fs::set_permissions(&subpath, fs::Permissions::from_mode(perm))?;
+            }
+        }
     }
     Ok(())
 }
@@ -228,6 +239,11 @@ fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
     path: Q,
     perm: u32,
 ) -> io::Result<()> {
+    let root = root.as_ref();
+    if !root.is_absolute() || !root.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "invalid root dir"));
+    }
+
     let path = {
         let path = path.as_ref();
         if path.is_absolute() {
@@ -237,7 +253,6 @@ fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
         }
     };
 
-    let root = root.as_ref();
     let dest = root.join(&path);
     fs::copy(&src, &dest)?;
     fs::set_permissions(&dest, fs::Permissions::from_mode(perm))?;
@@ -257,6 +272,14 @@ fn main() -> Result<()> {
             sysconfdir,
             build_args,
         } => {
+            match fs::create_dir(&dest).err() {
+                Some(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Some(err) => {
+                    return Err(err.into());
+                }
+                None => {}
+            }
+
             match dest.metadata() {
                 Ok(m) => {
                     if m.is_dir() {
