@@ -325,13 +325,12 @@ async fn exec() -> Result<ExitCode> {
                 ($name:ident) => {
                     paste! {
                         {
-                            if let Some(b) = bound_actions.$name.get_mut(&profile)
-                                && check_action(hand, &[<action_ $name>], b, &session, &now)?
-                            {
-                                true
-                            } else {
-                                false
-                            }
+                            bound_actions
+                                .$name
+                                .get_mut(&profile)
+                                .map(|b| check_action(hand, &[<action_ $name>], b, &session, &now))
+                                .transpose()?
+                                .is_some()
                         }
                     }
                 };
