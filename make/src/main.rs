@@ -374,7 +374,7 @@ fn main() -> Result<()> {
                 0o644,
             )?;
 
-            let etc_dir = sysconfdir;
+            let etc_dir = prefix.join(sysconfdir);
             install_dir(&dest, &etc_dir, 0o755)?;
 
             let etc_xdg_input_dir = etc_dir.join("xdg/solarxr-input");

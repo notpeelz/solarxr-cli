@@ -22,7 +22,6 @@ rustPlatform.buildRustPackage {
         shift 1
         exec ${pkgs.cargo}/bin/cargo make install \
           --prefix "/" \
-          --sysconfdir "/etc" \
           build -- "$@"
       else
         exec ${pkgs.cargo}/bin/cargo "$@"
