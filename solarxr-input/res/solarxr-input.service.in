@@ -1,0 +1,7 @@
+[Unit]
+Description=An OpenXR background app that provides bindings for SlimeVR
+
+[Service]
+ExecStart=@bindir@/solarxr-input
+TimeoutStopSec=5
+Restart=no

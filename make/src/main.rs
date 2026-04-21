@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead};
@@ -7,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use eyre::{Context, Result, bail, eyre};
+use tempfile::TempDir;
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
@@ -265,6 +267,29 @@ fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
     Ok(())
 }
 
+type ConfigureVars = HashMap<String, String>;
+
+fn configure_file<P: AsRef<Path>, Q: AsRef<Path>>(
+    src: P,
+    dst: Q,
+    vars: &ConfigureVars,
+) -> io::Result<PathBuf> {
+    let src = src.as_ref();
+    let dst = dst.as_ref();
+
+    let content = fs::read_to_string(src)?;
+
+    let mut result = content;
+    for (key, value) in vars {
+        let placeholder = format!("@{key}@");
+        result = result.replace(&placeholder, value);
+    }
+
+    fs::write(&dst, result)?;
+
+    Ok(dst.into())
+}
+
 fn main() -> Result<()> {
     let args = <Args as clap::Parser>::parse();
     match args.command {
@@ -313,8 +338,23 @@ fn main() -> Result<()> {
                 p
             };
             let artifacts = build(&build_args)?;
+            let tmp_dir = TempDir::new()?;
+            let tmp_dir = tmp_dir.path();
 
             let bin_dir = prefix.join(bindir);
+            let lib_dir = prefix.join(libdir);
+            let sysconf_dir = prefix.join(sysconfdir);
+            let dataroot_dir = prefix.join(datarootdir);
+
+            let vars = {
+                let mut vars = ConfigureVars::new();
+                vars.insert("bindir".into(), bin_dir.to_str().unwrap().into());
+                vars.insert("libdir".into(), lib_dir.to_str().unwrap().into());
+                vars.insert("sysconfdir".into(), sysconf_dir.to_str().unwrap().into());
+                vars.insert("datarootdir".into(), dataroot_dir.to_str().unwrap().into());
+                vars
+            };
+
             install_dir(&dest, &bin_dir, 0o755)?;
             install_file(artifacts.cli_exe, &dest, bin_dir.join("solarxr-cli"), 0o755)?;
             install_file(
@@ -324,12 +364,24 @@ fn main() -> Result<()> {
                 0o755,
             )?;
 
-            let lib_dir = prefix.join(libdir);
+            install_dir(&dest, &lib_dir, 0o755)?;
 
-            let share_dir = prefix.join(datarootdir);
-            install_dir(&dest, &share_dir, 0o755)?;
+            let systemd_user_unit_dir = lib_dir.join("systemd/user");
+            install_dir(&dest, &systemd_user_unit_dir, 0o755)?;
+            install_file(
+                configure_file(
+                    project_root.join("solarxr-input/res/solarxr-input.service.in"),
+                    tmp_dir.join("solarxr-input.service"),
+                    &vars,
+                )?,
+                &dest,
+                systemd_user_unit_dir.join("solarxr-input.service"),
+                0o644,
+            )?;
 
-            let bash_comp_dir = share_dir.join("bash-completion/completions");
+            install_dir(&dest, &dataroot_dir, 0o755)?;
+
+            let bash_comp_dir = dataroot_dir.join("bash-completion/completions");
             install_dir(&dest, &bash_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("solarxr-cli.bash"),
@@ -344,7 +396,7 @@ fn main() -> Result<()> {
                 0o644,
             )?;
 
-            let zsh_comp_dir = share_dir.join("zsh/site-functions");
+            let zsh_comp_dir = dataroot_dir.join("zsh/site-functions");
             install_dir(&dest, &zsh_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("_solarxr-cli"),
@@ -359,7 +411,7 @@ fn main() -> Result<()> {
                 0o644,
             )?;
 
-            let fish_comp_dir = share_dir.join("fish/vendor_completions.d");
+            let fish_comp_dir = dataroot_dir.join("fish/vendor_completions.d");
             install_dir(&dest, &fish_comp_dir, 0o755)?;
             install_file(
                 artifacts.cli_build_out_dir.join("solarxr-cli.fish"),
@@ -374,13 +426,12 @@ fn main() -> Result<()> {
                 0o644,
             )?;
 
-            let etc_dir = prefix.join(sysconfdir);
-            install_dir(&dest, &etc_dir, 0o755)?;
+            install_dir(&dest, &sysconf_dir, 0o755)?;
 
-            let etc_xdg_input_dir = etc_dir.join("xdg/solarxr-input");
+            let etc_xdg_input_dir = sysconf_dir.join("xdg/solarxr-input");
             install_dir(&dest, &etc_xdg_input_dir, 0o755)?;
             install_file(
-                project_root.join("solarxr-input/config.json"),
+                project_root.join("solarxr-input/res/config.json"),
                 &dest,
                 etc_xdg_input_dir.join("config.json"),
                 0o644,
