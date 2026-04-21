@@ -204,7 +204,7 @@ pub enum Command {
 
 fn install_dir<P: AsRef<Path>, D: AsRef<Path>>(root: P, path: D, perm: u32) -> io::Result<()> {
     let root = root.as_ref();
-    if !root.is_absolute() || !root.exists() {
+    if !root.exists() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "invalid root dir"));
     }
 
@@ -220,7 +220,7 @@ fn install_dir<P: AsRef<Path>, D: AsRef<Path>>(root: P, path: D, perm: u32) -> i
     let mut subpath = root.to_path_buf();
     for part in path.components() {
         subpath.push(part);
-        match fs::create_dir(root.join(&subpath)).err() {
+        match fs::create_dir(&subpath).err() {
             Some(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
             Some(err) => {
                 return Err(err);
@@ -240,7 +240,7 @@ fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
     perm: u32,
 ) -> io::Result<()> {
     let root = root.as_ref();
-    if !root.is_absolute() || !root.exists() {
+    if !root.exists() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "invalid root dir"));
     }
 
