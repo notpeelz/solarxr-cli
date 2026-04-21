@@ -195,6 +195,12 @@ pub enum Command {
         dest: PathBuf,
         #[arg(long = "prefix", default_value = "/usr")]
         prefix: PathBuf,
+        #[arg(long = "bindir", default_value = "bin")]
+        bindir: PathBuf,
+        #[arg(long = "libdir", default_value = "lib")]
+        libdir: PathBuf,
+        #[arg(long = "datarootdir", default_value = "share")]
+        datarootdir: PathBuf,
         #[arg(long = "sysconfdir", default_value = "/etc")]
         sysconfdir: PathBuf,
         #[arg(last = true)]
@@ -269,6 +275,9 @@ fn main() -> Result<()> {
         Command::Install {
             dest,
             prefix,
+            bindir,
+            libdir,
+            datarootdir,
             sysconfdir,
             build_args,
         } => {
@@ -305,7 +314,7 @@ fn main() -> Result<()> {
             };
             let artifacts = build(&build_args)?;
 
-            let bin_dir = prefix.join("bin");
+            let bin_dir = prefix.join(bindir);
             install_dir(&dest, &bin_dir, 0o755)?;
             install_file(artifacts.cli_exe, &dest, bin_dir.join("solarxr-cli"), 0o755)?;
             install_file(
@@ -315,7 +324,9 @@ fn main() -> Result<()> {
                 0o755,
             )?;
 
-            let share_dir = prefix.join("share");
+            let lib_dir = prefix.join(libdir);
+
+            let share_dir = prefix.join(datarootdir);
             install_dir(&dest, &share_dir, 0o755)?;
 
             let bash_comp_dir = share_dir.join("bash-completion/completions");
