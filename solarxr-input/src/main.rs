@@ -329,7 +329,7 @@ async fn exec() -> Result<ExitCode> {
                             .get_mut(&profile)
                             .map(|b| check_action(hand, &[<action_ $name>], b, &session, &now))
                             .transpose()?
-                            .is_some()
+                            .unwrap_or(false)
                     }
                 };
             }
