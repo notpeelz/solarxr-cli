@@ -324,14 +324,12 @@ async fn exec() -> Result<ExitCode> {
             macro_rules! check_action {
                 ($name:ident) => {
                     paste! {
-                        {
-                            bound_actions
-                                .$name
-                                .get_mut(&profile)
-                                .map(|b| check_action(hand, &[<action_ $name>], b, &session, &now))
-                                .transpose()?
-                                .is_some()
-                        }
+                        bound_actions
+                            .$name
+                            .get_mut(&profile)
+                            .map(|b| check_action(hand, &[<action_ $name>], b, &session, &now))
+                            .transpose()?
+                            .is_some()
                     }
                 };
             }
