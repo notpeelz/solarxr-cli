@@ -50,9 +50,9 @@ impl Default for Delays {
     fn default() -> Self {
         Self {
             yaw: Duration::ZERO,
-            full: Duration::from_secs(3),
-            mounting: Duration::from_secs(3),
-            mounting_feet: Duration::from_secs(3),
+            full: Duration::ZERO,
+            mounting: Duration::ZERO,
+            mounting_feet: Duration::ZERO,
         }
     }
 }
