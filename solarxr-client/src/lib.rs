@@ -211,7 +211,10 @@ pub enum SolarXRError {
 
 impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
     async fn from_socket_paths<P: AsRef<Path>>(socket_paths: &[P]) -> Result<Self, SolarXRError> {
-        assert!(!socket_paths.is_empty());
+        if socket_paths.is_empty() {
+            return Err(SolarXRError::SocketFileNotFound);
+        }
+
         let mut socket_paths = socket_paths.iter();
         let mut last_err = Option::<SolarXRError>::None;
         let stream = 'f: loop {
@@ -233,15 +236,24 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
     }
 
     pub async fn from_default_socket_paths() -> Result<Self, SolarXRError> {
+        const SOCKET_FILE: &str = "SlimeVRRpc";
         let mut socket_paths = Vec::<PathBuf>::new();
+
+        if let Ok(slimevr_socket_dir) = env::var("SLIMEVR_SOCKET_DIR") {
+            let slimevr_socket_dir = PathBuf::from(slimevr_socket_dir);
+            socket_paths.push(slimevr_socket_dir.join(SOCKET_FILE));
+        }
+
         if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
             let xdg_runtime_dir = PathBuf::from(xdg_runtime_dir);
-            socket_paths.push(xdg_runtime_dir.join("SlimeVRRpc"));
-            socket_paths
-                .push(xdg_runtime_dir.join(".flatpak/dev.slimevr.SlimeVR/xdg-run/SlimeVRRpc"));
-        } else {
-            return Err(SolarXRError::SocketFileNotFound);
+            socket_paths.push(xdg_runtime_dir.join(SOCKET_FILE));
+            socket_paths.push(
+                xdg_runtime_dir
+                    .join(".flatpak/dev.slimevr.SlimeVR/xdg-run")
+                    .join(SOCKET_FILE),
+            );
         }
+
         Self::from_socket_paths(&socket_paths).await
     }
 
