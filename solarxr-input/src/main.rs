@@ -149,12 +149,12 @@ async fn exec() -> Result<ExitCode> {
         let left = cfg
             .left
             .as_ref()
-            .map(|s| instance.string_to_path(&s))
+            .map(|s| instance.string_to_path(s))
             .transpose()?;
         let right = cfg
             .right
             .as_ref()
-            .map(|s| instance.string_to_path(&s))
+            .map(|s| instance.string_to_path(s))
             .transpose()?;
 
         let double_click = cfg.double_click.unwrap_or(false);
@@ -237,6 +237,7 @@ async fn exec() -> Result<ExitCode> {
         let now = Instant::now();
 
         while let Some(event) = instance.poll_event(&mut event_storage)? {
+            #[allow(clippy::single_match)]
             match event {
                 xr::Event::SessionStateChanged(e) => match e.state() {
                     xr::SessionState::IDLE => {
