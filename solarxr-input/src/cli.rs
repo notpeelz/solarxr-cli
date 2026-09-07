@@ -22,4 +22,9 @@ pub struct Args {
         value_hint = ValueHint::FilePath
     )]
     pub config_path: Option<PathBuf>,
+    #[arg(
+        long = "wait-xr",
+        help = "Wait for the XR runtime to become available instead of failing"
+    )]
+    pub wait_xr: bool,
 }

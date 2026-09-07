@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::env;
 use std::io;
+use std::os::raw::c_int;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::Once;
 use std::time::{Duration, Instant};
 
 use eyre::Result;
@@ -11,7 +13,7 @@ use paste::paste;
 use solarxr_client::SolarXRClient;
 use solarxr_client::SolarXRError;
 use solarxr_client::proto;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -20,6 +22,7 @@ mod cli;
 mod config;
 
 const CLICK_TIMEOUT: Duration = Duration::from_millis(300);
+const WAIT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 struct ActionBinding {
@@ -63,6 +66,41 @@ struct OpenXRState {
     action_tracking_unpause: xr::Action<bool>,
     action_tracking_pause_toggle: xr::Action<bool>,
     bound_actions: BoundActions,
+}
+
+fn is_retryable(err: xr::sys::Result) -> bool {
+    matches!(
+        err,
+        xr::sys::Result::ERROR_RUNTIME_UNAVAILABLE
+            | xr::sys::Result::ERROR_INITIALIZATION_FAILED
+            | xr::sys::Result::ERROR_FORM_FACTOR_UNAVAILABLE
+    )
+}
+
+struct SilenceStderr {
+    saved: c_int,
+    dev_null: c_int,
+}
+
+impl SilenceStderr {
+    fn new() -> Self {
+        unsafe {
+            let saved = libc::dup(libc::STDERR_FILENO);
+            let dev_null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+            libc::dup2(dev_null, libc::STDERR_FILENO);
+            SilenceStderr { saved, dev_null }
+        }
+    }
+}
+
+impl Drop for SilenceStderr {
+    fn drop(&mut self) {
+        unsafe {
+            libc::dup2(self.saved, libc::STDERR_FILENO);
+            libc::close(self.saved);
+            libc::close(self.dev_null);
+        }
+    }
 }
 
 fn init_openxr(cfg: &config::Config) -> openxr::Result<OpenXRState> {
@@ -263,7 +301,42 @@ async fn exec() -> Result<ExitCode> {
 
     let client = Arc::new(connect().await?);
 
-    let mut state = init_openxr(&cfg)?;
+    if args.wait_xr {
+        tokio::spawn(async {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to install SIGTERM handler");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = sigterm.recv() => {}
+            }
+            std::process::exit(0);
+        });
+    }
+
+    let mut attempts = 0_usize;
+    let mut state = loop {
+        attempts += 1;
+        let result = if attempts > 1 {
+            let _silence = SilenceStderr::new();
+            init_openxr(&cfg)
+        } else {
+            init_openxr(&cfg)
+        };
+        match result {
+            Ok(state) => break state,
+            Err(err) => {
+                if !args.wait_xr || !is_retryable(err) {
+                    return Err(err.into());
+                }
+                static WARN: Once = Once::new();
+                WARN.call_once(|| {
+                    warn!("XR runtime not available: {err}. Waiting for it to become ready.");
+                });
+                tokio::time::sleep(WAIT_INTERVAL).await;
+            }
+        }
+    };
 
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
