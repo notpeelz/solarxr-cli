@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eyre::{Result, bail};
+use eyre::Result;
 use openxr as xr;
 use paste::paste;
 use solarxr_client::SolarXRClient;
@@ -34,6 +34,179 @@ struct BoundAction {
     binding: ActionBinding,
     click_count: usize,
     last_clicked: Option<Instant>,
+}
+
+type ProfileBindingMap = HashMap<String, BoundAction>;
+
+#[derive(Default)]
+struct BoundActions {
+    reset_yaw: ProfileBindingMap,
+    reset_full: ProfileBindingMap,
+    reset_mounting: ProfileBindingMap,
+    reset_mounting_feet: ProfileBindingMap,
+    tracking_pause: ProfileBindingMap,
+    tracking_unpause: ProfileBindingMap,
+    tracking_pause_toggle: ProfileBindingMap,
+}
+
+struct OpenXRState {
+    instance: xr::Instance,
+    session: xr::Session<xr::Headless>,
+    left_hand: xr::Path,
+    right_hand: xr::Path,
+    action_set: xr::ActionSet,
+    action_reset_yaw: xr::Action<bool>,
+    action_reset_full: xr::Action<bool>,
+    action_reset_mounting: xr::Action<bool>,
+    action_reset_mounting_feet: xr::Action<bool>,
+    action_tracking_pause: xr::Action<bool>,
+    action_tracking_unpause: xr::Action<bool>,
+    action_tracking_pause_toggle: xr::Action<bool>,
+    bound_actions: BoundActions,
+}
+
+fn init_openxr(cfg: &config::Config) -> openxr::Result<OpenXRState> {
+    let entry = xr::Entry::linked();
+
+    let available_extensions = entry.enumerate_extensions()?;
+    let mut extensions = xr::ExtensionSet::default();
+
+    if !available_extensions.mnd_headless {
+        return Err(xr::sys::Result::ERROR_EXTENSION_NOT_PRESENT);
+    }
+    extensions.mnd_headless = true;
+    extensions.ext_hp_mixed_reality_controller =
+        available_extensions.ext_hp_mixed_reality_controller;
+
+    let instance = entry.create_instance(
+        &xr::ApplicationInfo {
+            application_name: "solarxr-input",
+            application_version: 1,
+            ..Default::default()
+        },
+        &extensions,
+        &[],
+    )?;
+    let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
+    let (session, _, _) = unsafe {
+        instance.create_session::<xr::Headless>(system, &xr::headless::SessionCreateInfo {})
+    }?;
+
+    let left_hand = instance.string_to_path("/user/hand/left")?;
+    let right_hand = instance.string_to_path("/user/hand/right")?;
+    let subaction_paths = [left_hand, right_hand];
+
+    let action_set = instance.create_action_set("main", "Main Bindings", 0)?;
+    let action_reset_yaw =
+        action_set.create_action::<bool>("reset_yaw", "Yaw Reset", &subaction_paths)?;
+    let action_reset_full =
+        action_set.create_action::<bool>("reset_full", "Full Reset", &subaction_paths)?;
+    let action_reset_mounting =
+        action_set.create_action::<bool>("reset_mounting", "Mounting Reset", &subaction_paths)?;
+    let action_reset_mounting_feet = action_set.create_action::<bool>(
+        "reset_mounting_feet",
+        "Feet Mounting Reset",
+        &subaction_paths,
+    )?;
+    let action_tracking_pause =
+        action_set.create_action::<bool>("tracking_pause", "Pause tracking", &subaction_paths)?;
+    let action_tracking_unpause = action_set.create_action::<bool>(
+        "tracking_unpause",
+        "Unpause tracking",
+        &subaction_paths,
+    )?;
+    let action_tracking_pause_toggle = action_set.create_action::<bool>(
+        "tracking_pause_toggle",
+        "Toggle Pause Tracking",
+        &subaction_paths,
+    )?;
+
+    let instantiate_binding = |cfg: &config::ActionBinding| -> openxr::Result<ActionBinding> {
+        let left = cfg
+            .left
+            .as_ref()
+            .map(|s| instance.string_to_path(s))
+            .transpose()?;
+        let right = cfg
+            .right
+            .as_ref()
+            .map(|s| instance.string_to_path(s))
+            .transpose()?;
+
+        let double_click = cfg.double_click.unwrap_or(false);
+        let triple_click = cfg.triple_click.unwrap_or(false);
+        if double_click && triple_click {
+            return Err(xr::sys::Result::ERROR_VALIDATION_FAILURE);
+        }
+
+        Ok(ActionBinding {
+            left,
+            right,
+            double_click,
+            triple_click,
+        })
+    };
+
+    let mut bound_actions = BoundActions::default();
+
+    for (profile_path, p) in &*cfg.action_profiles {
+        let mut bindings = Vec::<xr::Binding>::new();
+        macro_rules! instantiate {
+            ($name:ident) => {
+                paste! {
+                    if let Some(binding) = p.$name.as_ref().map(instantiate_binding).transpose()? {
+                        if let Some(left) = binding.left {
+                            bindings.push(xr::Binding::new(&[<action_ $name>], left));
+                        }
+
+                        if let Some(right) = binding.right {
+                            bindings.push(xr::Binding::new(&[<action_ $name>], right));
+                        }
+
+                        bound_actions.$name.insert(
+                            profile_path.to_owned(),
+                            BoundAction {
+                                binding,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            };
+        }
+
+        instantiate!(reset_yaw);
+        instantiate!(reset_full);
+        instantiate!(reset_mounting);
+        instantiate!(reset_mounting_feet);
+        instantiate!(tracking_pause);
+        instantiate!(tracking_unpause);
+        instantiate!(tracking_pause_toggle);
+
+        if !bindings.is_empty() {
+            instance.suggest_interaction_profile_bindings(
+                instance.string_to_path(profile_path)?,
+                &bindings,
+            )?;
+        }
+    }
+    session.attach_action_sets(&[&action_set])?;
+
+    Ok(OpenXRState {
+        instance,
+        session,
+        left_hand,
+        right_hand,
+        action_set,
+        action_reset_yaw,
+        action_reset_full,
+        action_reset_mounting,
+        action_reset_mounting_feet,
+        action_tracking_pause,
+        action_tracking_unpause,
+        action_tracking_pause_toggle,
+        bound_actions,
+    })
 }
 
 #[cfg(debug_assertions)]
@@ -90,142 +263,7 @@ async fn exec() -> Result<ExitCode> {
 
     let client = Arc::new(connect().await?);
 
-    let entry = xr::Entry::linked();
-
-    let available_extensions = entry.enumerate_extensions()?;
-    let mut extensions = xr::ExtensionSet::default();
-
-    if !available_extensions.mnd_headless {
-        bail!("xr runtime doesn't support MND_headless");
-    }
-    extensions.mnd_headless = true;
-    extensions.ext_hp_mixed_reality_controller =
-        available_extensions.ext_hp_mixed_reality_controller;
-
-    let instance = entry.create_instance(
-        &xr::ApplicationInfo {
-            application_name: "solarxr-input",
-            application_version: 1,
-            ..Default::default()
-        },
-        &extensions,
-        &[],
-    )?;
-    let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
-    let (session, _, _) = unsafe {
-        instance.create_session::<xr::Headless>(system, &xr::headless::SessionCreateInfo {})
-    }?;
-
-    let left_hand = instance.string_to_path("/user/hand/left")?;
-    let right_hand = instance.string_to_path("/user/hand/right")?;
-    let subaction_paths = [left_hand, right_hand];
-
-    let action_set = instance.create_action_set("main", "Main Bindings", 0)?;
-    let action_reset_yaw =
-        action_set.create_action::<bool>("reset_yaw", "Yaw Reset", &subaction_paths)?;
-    let action_reset_full =
-        action_set.create_action::<bool>("reset_full", "Full Reset", &subaction_paths)?;
-    let action_reset_mounting =
-        action_set.create_action::<bool>("reset_mounting", "Mounting Reset", &subaction_paths)?;
-    let action_reset_mounting_feet = action_set.create_action::<bool>(
-        "reset_mounting_feet",
-        "Feet Mounting Reset",
-        &subaction_paths,
-    )?;
-    let action_tracking_pause =
-        action_set.create_action::<bool>("tracking_pause", "Pause tracking", &subaction_paths)?;
-    let action_tracking_unpause = action_set.create_action::<bool>(
-        "tracking_unpause",
-        "Unpause tracking",
-        &subaction_paths,
-    )?;
-    let action_tracking_pause_toggle = action_set.create_action::<bool>(
-        "tracking_pause_toggle",
-        "Toggle Pause Tracking",
-        &subaction_paths,
-    )?;
-
-    let instantiate_binding = |cfg: &config::ActionBinding| -> Result<ActionBinding> {
-        let left = cfg
-            .left
-            .as_ref()
-            .map(|s| instance.string_to_path(s))
-            .transpose()?;
-        let right = cfg
-            .right
-            .as_ref()
-            .map(|s| instance.string_to_path(s))
-            .transpose()?;
-
-        let double_click = cfg.double_click.unwrap_or(false);
-        let triple_click = cfg.triple_click.unwrap_or(false);
-        if double_click && triple_click {
-            bail!("binding can't have double_click and triple_click");
-        }
-
-        Ok(ActionBinding {
-            left,
-            right,
-            double_click,
-            triple_click,
-        })
-    };
-
-    type ProfileBindingMap = HashMap<String, BoundAction>;
-    #[derive(Default)]
-    struct BoundActions {
-        reset_yaw: ProfileBindingMap,
-        reset_full: ProfileBindingMap,
-        reset_mounting: ProfileBindingMap,
-        reset_mounting_feet: ProfileBindingMap,
-        tracking_pause: ProfileBindingMap,
-        tracking_unpause: ProfileBindingMap,
-        tracking_pause_toggle: ProfileBindingMap,
-    }
-    let mut bound_actions = BoundActions::default();
-
-    for (profile_path, p) in &*cfg.action_profiles {
-        let mut bindings = Vec::<xr::Binding>::new();
-        macro_rules! instantiate {
-            ($name:ident) => {
-                paste! {
-                    if let Some(binding) = p.$name.as_ref().map(instantiate_binding).transpose()? {
-                        if let Some(left) = binding.left {
-                            bindings.push(xr::Binding::new(&[<action_ $name>], left));
-                        }
-
-                        if let Some(right) = binding.right {
-                            bindings.push(xr::Binding::new(&[<action_ $name>], right));
-                        }
-
-                        bound_actions.$name.insert(
-                            profile_path.to_owned(),
-                            BoundAction {
-                                binding,
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-            };
-        }
-
-        instantiate!(reset_yaw);
-        instantiate!(reset_full);
-        instantiate!(reset_mounting);
-        instantiate!(reset_mounting_feet);
-        instantiate!(tracking_pause);
-        instantiate!(tracking_unpause);
-        instantiate!(tracking_pause_toggle);
-
-        if !bindings.is_empty() {
-            instance.suggest_interaction_profile_bindings(
-                instance.string_to_path(profile_path)?,
-                &bindings,
-            )?;
-        }
-    }
-    session.attach_action_sets(&[&action_set])?;
+    let mut state = init_openxr(&cfg)?;
 
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
@@ -236,7 +274,7 @@ async fn exec() -> Result<ExitCode> {
         ticker.tick().await;
         let now = Instant::now();
 
-        while let Some(event) = instance.poll_event(&mut event_storage)? {
+        while let Some(event) = state.instance.poll_event(&mut event_storage)? {
             #[allow(clippy::single_match)]
             match event {
                 xr::Event::SessionStateChanged(e) => match e.state() {
@@ -245,7 +283,9 @@ async fn exec() -> Result<ExitCode> {
                     }
                     xr::SessionState::READY => {
                         trace!("session state changed: READY");
-                        session.begin(xr::ViewConfigurationType::PRIMARY_STEREO)?;
+                        state
+                            .session
+                            .begin(xr::ViewConfigurationType::PRIMARY_STEREO)?;
                     }
                     xr::SessionState::VISIBLE => {
                         trace!("session state changed: VISIBLE");
@@ -259,7 +299,7 @@ async fn exec() -> Result<ExitCode> {
                     }
                     xr::SessionState::STOPPING => {
                         trace!("session state changed: STOPPING");
-                        session.end()?;
+                        state.session.end()?;
                         session_running = false;
                     }
                     xr::SessionState::LOSS_PENDING => {
@@ -281,14 +321,16 @@ async fn exec() -> Result<ExitCode> {
             continue;
         }
 
-        session.sync_actions(&[xr::ActiveActionSet::new(&action_set)])?;
+        state
+            .session
+            .sync_actions(&[xr::ActiveActionSet::new(&state.action_set)])?;
 
-        for hand in [left_hand, right_hand] {
-            let profile = session.current_interaction_profile(hand)?;
+        for hand in [state.left_hand, state.right_hand] {
+            let profile = state.session.current_interaction_profile(hand)?;
             if profile == xr::Path::NULL {
                 continue;
             }
-            let profile = instance.path_to_string(profile)?;
+            let profile = state.instance.path_to_string(profile)?;
 
             fn check_action(
                 hand: xr::Path,
@@ -325,10 +367,11 @@ async fn exec() -> Result<ExitCode> {
             macro_rules! check_action {
                 ($name:ident) => {
                     paste! {
-                        bound_actions
+                        state
+                            .bound_actions
                             .$name
                             .get_mut(&profile)
-                            .map(|b| check_action(hand, &[<action_ $name>], b, &session, &now))
+                            .map(|b| check_action(hand, &state.[<action_ $name>], b, &state.session, &now))
                             .transpose()?
                             .unwrap_or(false)
                     }
