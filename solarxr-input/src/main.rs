@@ -13,7 +13,7 @@ use paste::paste;
 use solarxr_client::SolarXRClient;
 use solarxr_client::SolarXRError;
 use solarxr_client::proto;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -337,6 +337,8 @@ async fn exec() -> Result<ExitCode> {
             }
         }
     };
+
+    info!("XR runtime ready");
 
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
