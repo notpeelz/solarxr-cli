@@ -261,7 +261,7 @@ fn install_file<P: AsRef<Path>, D: AsRef<Path>, Q: AsRef<Path>>(
         }
     };
 
-    let dest = root.join(&path);
+    let dest = root.join(path);
     fs::copy(&src, &dest)?;
     fs::set_permissions(&dest, fs::Permissions::from_mode(perm))?;
     Ok(())
@@ -285,7 +285,7 @@ fn configure_file<P: AsRef<Path>, Q: AsRef<Path>>(
         result = result.replace(&placeholder, value);
     }
 
-    fs::write(&dst, result)?;
+    fs::write(dst, result)?;
 
     Ok(dst.into())
 }
