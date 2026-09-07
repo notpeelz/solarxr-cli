@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 eyre = "0.6.14"
-libc = "0.2"
+libc = "0.2.189"
 openxr = { version = "0.21.1", features = ["linked"], default-features = false }
 paste = "1.0.15"
 serde = { version = "1.0.229", features = ["derive"] }
