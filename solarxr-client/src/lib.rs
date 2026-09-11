@@ -449,7 +449,6 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
 macro_rules! impl_reset {
     ($name:ident; $reset_type:expr) => {
-        #[instrument(level = "trace", skip(self))]
         pub async fn $name(&self, delay: Duration, wait_until_finished: bool) -> Result<()> {
             self.reset($reset_type, delay, wait_until_finished).await
         }
@@ -459,7 +458,6 @@ macro_rules! impl_reset {
 macro_rules! impl_reset_with_parts {
     ($name:ident; $reset_type:expr) => {
         #[allow(dead_code)]
-        #[instrument(level = "trace", skip(self))]
         pub async fn $name(
             &self,
             body_parts: &[proto::datatypes::BodyPart],
