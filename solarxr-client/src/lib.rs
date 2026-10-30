@@ -7,16 +7,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use solarxr_protocol::datatypes::TransactionId;
 use solarxr_protocol::flatbuffers::{FlatBufferBuilder, WIPOffset};
 use solarxr_protocol::rpc::{
-    DetectStayAlignedRelaxedPoseRequest, DetectStayAlignedRelaxedPoseRequestArgs,
-    EnableStayAlignedRequest, EnableStayAlignedRequestArgs, HeightRequest, HeightRequestArgs,
-    ResetRequest, ResetRequestArgs, ResetStatus, ResetStayAlignedRelaxedPoseRequest,
+    ChangeStayAlignedSettingsRequest, ChangeStayAlignedSettingsRequestArgs, ResetLifecycle,
+    ResetRequest, ResetRequestArgs, ResetStayAlignedRelaxedPoseRequest,
     ResetStayAlignedRelaxedPoseRequestArgs, ResetType, RpcMessage, RpcMessageHeader,
-    RpcMessageHeaderArgs, SetPauseTrackingRequest, SetPauseTrackingRequestArgs, SettingsRequest,
-    SettingsRequestArgs, StayAlignedRelaxedPose, TrackingPauseStateRequest,
-    TrackingPauseStateRequestArgs,
+    RpcMessageHeaderArgs, SetPauseTrackingRequest, SetPauseTrackingRequestArgs,
+    StartStayAlignedPoseRecordingRequest, StartStayAlignedPoseRecordingRequestArgs,
+    StayAlignedRelaxedPose, StayAlignedSettingsRequest, StayAlignedSettingsRequestArgs,
+    TrackingPauseStateRequest, TrackingPauseStateRequestArgs, UserHeightRequest,
+    UserHeightRequestArgs,
 };
 use solarxr_protocol::{MessageBundle, MessageBundleArgs, flatbuffers};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -60,8 +60,11 @@ pub mod owned {
             Self { msg }
         }
 
-        pub fn as_flatbuf(&'_ self) -> proto::rpc::HeightResponse<'_> {
-            self.msg.as_flatbuf().message_as_height_response().unwrap()
+        pub fn as_flatbuf(&'_ self) -> proto::rpc::UserHeightResponse<'_> {
+            self.msg
+                .as_flatbuf()
+                .message_as_user_height_response()
+                .unwrap()
         }
     }
 }
@@ -127,16 +130,14 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
         let shared_buf = LazyCell::new(|| Arc::new(buf.to_vec()));
         if let Some(rpc_msgs) = bundle.rpc_msgs() {
             for msg in rpc_msgs {
-                if let Some(tx_id) = msg.tx_id() {
-                    trace!(
-                        "pumped message (transaction {}): {:?}",
-                        tx_id.id(),
-                        msg.message_type()
-                    );
-                } else {
-                    trace!("pumped message: {:?}", msg.message_type());
-                }
-                let Some(transaction_id) = msg.tx_id() else {
+                trace!(
+                    "pumped message (tx_id {:?}, reply_to {:?}): {:?}",
+                    msg.tx_id(),
+                    msg.reply_to(),
+                    msg.message_type()
+                );
+
+                let Some(reply_id) = msg.reply_to() else {
                     continue;
                 };
 
@@ -145,7 +146,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
                     .transactions
                     .lock()
                     .await
-                    .get(&transaction_id.id())
+                    .get(&reply_id)
                 {
                     let res = tx
                         .send(owned::RpcMessageHeader {
@@ -157,10 +158,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
                         debug!("failed to complete transaction; receiver disconnected");
                     }
                 } else {
-                    warn!(
-                        "unexpected message with transaction id {}",
-                        transaction_id.id()
-                    );
+                    warn!("unexpected message with reply id {}", reply_id);
                 }
             }
         }
@@ -170,7 +168,7 @@ impl<const BUF_SIZE: usize> ClientState<BUF_SIZE> {
 }
 
 struct Transaction {
-    id: TransactionId,
+    id: u32,
     rx: mpsc::Receiver<owned::RpcMessageHeader>,
     state: Arc<TransactionsState>,
 }
@@ -178,7 +176,7 @@ struct Transaction {
 // FIXME: use AsyncDrop
 impl Drop for Transaction {
     fn drop(&mut self) {
-        let id = self.id.id();
+        let id = self.id;
         let state = self.state.clone();
         tokio::spawn(async move {
             let mut transactions = state.transactions.lock().await;
@@ -237,6 +235,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
 
     pub async fn from_default_socket_paths() -> Result<Self, SolarXRError> {
         const SOCKET_FILE: &str = "SlimeVRRpc";
+        const SLIMEVR_DATA_NAME: &str = "dev.slimevr.SlimeVR";
         let mut socket_paths = Vec::<PathBuf>::new();
 
         if let Ok(slimevr_socket_dir) = env::var("SLIMEVR_SOCKET_DIR") {
@@ -244,12 +243,22 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             socket_paths.push(slimevr_socket_dir.join(SOCKET_FILE));
         }
 
+        if let Ok(xdg_data_home) = env::var("XDG_DATA_HOME") {
+            let xdg_data_home = PathBuf::from(xdg_data_home);
+            socket_paths.push(xdg_data_home.join(SLIMEVR_DATA_NAME).join(SOCKET_FILE));
+        } else if let Some(home) = env::home_dir() {
+            let xdg_data_home = PathBuf::from(home).join(".local").join("share");
+            socket_paths.push(xdg_data_home.join(SLIMEVR_DATA_NAME).join(SOCKET_FILE));
+        }
+
         if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
             let xdg_runtime_dir = PathBuf::from(xdg_runtime_dir);
             socket_paths.push(xdg_runtime_dir.join(SOCKET_FILE));
             socket_paths.push(
                 xdg_runtime_dir
-                    .join(".flatpak/dev.slimevr.SlimeVR/xdg-run")
+                    .join(".flatpak")
+                    .join(SLIMEVR_DATA_NAME)
+                    .join("xdg-run")
                     .join(SOCKET_FILE),
             );
         }
@@ -320,7 +329,7 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
         transactions.insert(id, tx);
         trace!("registered new transaction {}", id);
         Transaction {
-            id: TransactionId::new(id),
+            id: id,
             state: Arc::clone(&self.state.transactions_state),
             rx,
         }
@@ -361,7 +370,8 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: Some(&transaction.id),
+                    tx_id: Some(transaction.id),
+                    reply_to: None,
                     message_type: RpcMessage::ResetRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -377,14 +387,14 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
                     .await?;
                 let response = response
                     .as_flatbuf()
-                    .message_as_reset_response()
+                    .message_as_reset_status_response()
                     .ok_or_else(|| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
-                            "received message isn't a ResetResponse",
+                            "received message isn't a ResetStatusResponse",
                         )
                     })?;
-                if response.status() == ResetStatus::FINISHED {
+                if response.lifecycle() == ResetLifecycle::DONE {
                     break;
                 }
             }
@@ -414,7 +424,8 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: Some(&transaction.id),
+                    tx_id: Some(transaction.id),
+                    reply_to: None,
                     message_type: RpcMessage::ResetRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -430,14 +441,14 @@ impl<const BUF_SIZE: usize> SolarXRClient<BUF_SIZE> {
                     .await?;
                 let response = response
                     .as_flatbuf()
-                    .message_as_reset_response()
+                    .message_as_reset_status_response()
                     .ok_or_else(|| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
-                            "received message isn't a ResetResponse",
+                            "received message isn't a ResetStatusResponse",
                         )
                     })?;
-                if response.status() == ResetStatus::FINISHED {
+                if response.lifecycle() == ResetLifecycle::DONE {
                     break;
                 }
             }
@@ -471,12 +482,12 @@ macro_rules! impl_reset_with_parts {
 }
 
 impl SolarXRClient {
-    impl_reset!(reset_yaw; ResetType::Yaw);
-    impl_reset!(reset_mounting; ResetType::Mounting);
-    impl_reset!(reset_full; ResetType::Full);
-    impl_reset_with_parts!(reset_yaw_with_parts; ResetType::Yaw);
-    impl_reset_with_parts!(reset_mounting_with_parts; ResetType::Mounting);
-    impl_reset_with_parts!(reset_full_with_parts; ResetType::Full);
+    impl_reset!(reset_yaw; ResetType::YAW);
+    impl_reset!(reset_mounting; ResetType::MOUNTING);
+    impl_reset!(reset_full; ResetType::FULL);
+    impl_reset_with_parts!(reset_yaw_with_parts; ResetType::YAW);
+    impl_reset_with_parts!(reset_mounting_with_parts; ResetType::MOUNTING);
+    impl_reset_with_parts!(reset_full_with_parts; ResetType::FULL);
 
     #[instrument(level = "trace", skip(self))]
     pub async fn pause_tracking_state(&self) -> Result<bool> {
@@ -490,7 +501,8 @@ impl SolarXRClient {
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: Some(&transaction.id),
+                    tx_id: Some(transaction.id),
+                    reply_to: None,
                     message_type: RpcMessage::TrackingPauseStateRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -510,7 +522,7 @@ impl SolarXRClient {
                     "received message isn't a TrackingPauseStateResponse",
                 )
             })?;
-        Ok(response.trackingPaused())
+        Ok(response.tracking_paused())
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -520,13 +532,14 @@ impl SolarXRClient {
             let m = SetPauseTrackingRequest::create(
                 &mut fbb,
                 &SetPauseTrackingRequestArgs {
-                    pauseTracking: state,
+                    pause_tracking: state,
                 },
             );
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
                     tx_id: None,
+                    reply_to: None,
                     message_type: RpcMessage::SetPauseTrackingRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -541,15 +554,16 @@ impl SolarXRClient {
     pub async fn save_stay_aligned_pose(&self, pose: StayAlignedRelaxedPose) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
-            let m = DetectStayAlignedRelaxedPoseRequest::create(
+            let m = StartStayAlignedPoseRecordingRequest::create(
                 &mut fbb,
-                &DetectStayAlignedRelaxedPoseRequestArgs { pose },
+                &StartStayAlignedPoseRecordingRequestArgs { pose },
             );
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
                     tx_id: None,
-                    message_type: RpcMessage::DetectStayAlignedRelaxedPoseRequest,
+                    reply_to: None,
+                    message_type: RpcMessage::StartStayAlignedPoseRecordingRequest,
                     message: Some(m.as_union_value()),
                 },
             )
@@ -571,6 +585,7 @@ impl SolarXRClient {
                 &mut fbb,
                 &RpcMessageHeaderArgs {
                     tx_id: None,
+                    reply_to: None,
                     message_type: RpcMessage::ResetStayAlignedRelaxedPoseRequest,
                     message: Some(m.as_union_value()),
                 },
@@ -585,15 +600,19 @@ impl SolarXRClient {
     pub async fn set_stay_aligned_enabled(&self, enabled: bool) -> Result<()> {
         let mut fbb = FlatBufferBuilder::new();
         let m = {
-            let m = EnableStayAlignedRequest::create(
+            let m = ChangeStayAlignedSettingsRequest::create(
                 &mut fbb,
-                &EnableStayAlignedRequestArgs { enable: enabled },
+                &ChangeStayAlignedSettingsRequestArgs {
+                    enabled,
+                    pose_toggles: None,
+                },
             );
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
                     tx_id: None,
-                    message_type: RpcMessage::EnableStayAlignedRequest,
+                    reply_to: None,
+                    message_type: RpcMessage::ChangeStayAlignedSettingsRequest,
                     message: Some(m.as_union_value()),
                 },
             )
@@ -608,12 +627,16 @@ impl SolarXRClient {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
-            let m = SettingsRequest::create(&mut fbb, &SettingsRequestArgs::default());
+            let m = StayAlignedSettingsRequest::create(
+                &mut fbb,
+                &StayAlignedSettingsRequestArgs::default(),
+            );
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: Some(&transaction.id),
-                    message_type: RpcMessage::SettingsRequest,
+                    tx_id: Some(transaction.id),
+                    reply_to: None,
+                    message_type: RpcMessage::StayAlignedSettingsRequest,
                     message: Some(m.as_union_value()),
                 },
             )
@@ -623,18 +646,15 @@ impl SolarXRClient {
         let response = self
             .consume_message(&mut transaction.rx, RPC_TIMEOUT)
             .await?;
-        let response = response
+        let stay_aligned_settings = response
             .as_flatbuf()
-            .message_as_settings_response()
+            .message_as_stay_aligned_settings_response()
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "received message isn't a SettingsResponse",
+                    "received message isn't a StayAlignedSettingsResponse",
                 )
             })?;
-        let Some(stay_aligned_settings) = response.stay_aligned() else {
-            return Ok(false);
-        };
 
         Ok(stay_aligned_settings.enabled())
     }
@@ -644,12 +664,13 @@ impl SolarXRClient {
         let mut fbb = FlatBufferBuilder::new();
         let mut transaction = self.new_transaction().await;
         let m = {
-            let m = HeightRequest::create(&mut fbb, &HeightRequestArgs::default());
+            let m = UserHeightRequest::create(&mut fbb, &UserHeightRequestArgs::default());
             RpcMessageHeader::create(
                 &mut fbb,
                 &RpcMessageHeaderArgs {
-                    tx_id: Some(&transaction.id),
-                    message_type: RpcMessage::HeightRequest,
+                    tx_id: Some(transaction.id),
+                    reply_to: None,
+                    message_type: RpcMessage::UserHeightRequest,
                     message: Some(m.as_union_value()),
                 },
             )
@@ -659,10 +680,10 @@ impl SolarXRClient {
         let response = self
             .consume_message(&mut transaction.rx, RPC_TIMEOUT)
             .await?;
-        if response.as_flatbuf().message_type() != RpcMessage::HeightResponse {
+        if response.as_flatbuf().message_type() != RpcMessage::UserHeightResponse {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "received message isn't a HeightResponse",
+                "received message isn't a UserHeightResponse",
             ));
         }
         Ok(owned::HeightResponse::new(response))
